@@ -114,7 +114,7 @@ namespace MediaInfoKeeper.Store
 
             document.MediaSourceInfo = null;
 
-            if (document.Chapters == null || document.Chapters.Count == 0)
+            if (!document.HasPayload())
             {
                 DeleteJsonFile(mediaInfoJsonPath);
                 this.logger.Info($"MediaSourceInfoStore 删除Json媒体源信息成功并删除文件: {(item.FileName ?? item.Path)}");
@@ -217,6 +217,7 @@ namespace MediaInfoKeeper.Store
             mediaSource.Id = null;
             mediaSource.ItemId = null;
             mediaSource.Path = null;
+            mediaSource.Chapters = null;
 
             foreach (var subtitle in mediaSource.MediaStreams.Where(m =>
                          m.IsExternal && m.Type == MediaStreamType.Subtitle &&

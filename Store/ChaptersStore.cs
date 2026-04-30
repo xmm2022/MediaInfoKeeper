@@ -139,7 +139,7 @@ namespace MediaInfoKeeper.Store
 
             document.Chapters.Clear();
 
-            if (document.MediaSourceInfo == null)
+            if (!document.HasPayload())
             {
                 DeleteJsonFile(mediaInfoJsonPath);
                 this.logger.Info($"ChaptersStore 删除Json章节信息成功并删除文件: {(item.FileName ?? item.Path)}");

@@ -178,7 +178,7 @@ namespace MediaInfoKeeper.Services
             }
             else if (workItem is Audio)
             {
-                Plugin.AudioMetadataStore.ApplyToItem(workItem);
+                Plugin.EmbeddedInfoStore.ApplyToItem(workItem);
             }
 
             if (restoreResult == MediaInfoDocument.MediaInfoRestoreResult.Restored ||

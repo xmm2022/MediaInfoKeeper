@@ -22,7 +22,7 @@ namespace MediaInfoKeeper.Store
 
             if (item is Audio)
             {
-                Plugin.AudioMetadataStore?.OverWriteToFile(item);
+                Plugin.EmbeddedInfoStore?.OverWriteToFile(item);
             }
         }
     }

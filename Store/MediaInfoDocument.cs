@@ -27,7 +27,17 @@ namespace MediaInfoKeeper.Store
 
         public List<ChapterInfo> Chapters { get; set; } = new List<ChapterInfo>();
 
-        public AudioMetadataSnapshot AudioMetadata { get; set; }
+        public string EmbeddedImage { get; set; }
+
+        public EmbeddedInfoSnapshot EmbeddedInfo { get; set; }
+
+        public bool HasPayload()
+        {
+            return MediaSourceInfo != null ||
+                   (Chapters?.Count ?? 0) > 0 ||
+                   !string.IsNullOrWhiteSpace(EmbeddedImage) ||
+                   EmbeddedInfo != null;
+        }
 
         public static string GetMediaInfoJsonPath(BaseItem item)
         {
@@ -84,7 +94,7 @@ namespace MediaInfoKeeper.Store
         }
     }
 
-    public class AudioMetadataSnapshot
+    public class EmbeddedInfoSnapshot
     {
         public string Name { get; set; }
 
@@ -104,10 +114,6 @@ namespace MediaInfoKeeper.Store
 
         public Dictionary<string, string> ProviderIds { get; set; } =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        public string PrimaryImageBase64 { get; set; }
-
-        public string PrimaryImageMimeType { get; set; }
     }
 
 }

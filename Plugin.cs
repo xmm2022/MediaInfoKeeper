@@ -50,7 +50,7 @@ namespace MediaInfoKeeper
         
         public static ChaptersStore ChaptersStore { get; private set; }
         public static MediaSourceInfoStore MediaSourceInfoStore { get; private set; }
-        public static AudioMetadataStore AudioMetadataStore { get; private set; }
+        public static EmbeddedInfoStore EmbeddedInfoStore { get; private set; }
         public static LibraryService LibraryService { get; private set; }
         public static NotificationApi NotificationApi { get; private set; }
         public static IntroSkipChapterApi IntroSkipChapterApi { get; private set; }
@@ -199,7 +199,7 @@ namespace MediaInfoKeeper
             MediaInfoService = new MediaInfoService(libraryManager, mediaSourceManager, fileSystem);
             ChaptersStore = new ChaptersStore(itemRepository, fileSystem, jsonSerializer);
             MediaSourceInfoStore = new MediaSourceInfoStore(libraryManager, itemRepository, fileSystem, jsonSerializer);
-            AudioMetadataStore = new AudioMetadataStore(jsonSerializer);
+            EmbeddedInfoStore = new EmbeddedInfoStore(jsonSerializer);
             DanmuService = new DanmuService(logManager, httpClient);
 
             NotificationApi = new NotificationApi(notificationManager, userManager, sessionManager);
@@ -713,7 +713,7 @@ namespace MediaInfoKeeper
                     }
                     else if (e.Item is Audio)
                     {
-                        AudioMetadataStore.ApplyToItem(e.Item);
+                        EmbeddedInfoStore.ApplyToItem(e.Item);
                     }
 
                     // 如果不存在Json文件，则使用ffprobe 提取一次
