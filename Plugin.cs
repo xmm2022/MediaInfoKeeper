@@ -941,6 +941,12 @@ namespace MediaInfoKeeper
                             {
                                 this.logger.Info($"已发送入库通知: 剧集={series.Name} {newEpisode.Name}, 通知用户数={sentCount}");
                             }
+                            // 开始执行扫描收藏片头,避免重复，判断未开启所有入库扫描
+                            var canScanIntro = this.Options.IntroSkip?.ScanIntroOnFavorite == true && this.Options.IntroSkip?.ScanIntroOnItemAdded == false;
+                            if (canScanIntro)
+                            {
+                                IntroScanService.QueueEpisodeScan(newEpisode, "收藏入库");
+                            }
                         }
                         else
                         {

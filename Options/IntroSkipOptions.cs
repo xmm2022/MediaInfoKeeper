@@ -28,11 +28,11 @@ namespace MediaInfoKeeper.Options
 
         [DisplayName("入库时扫描片头")]
         [Description("新剧集入库时触发片头检测，不判断媒体库的片头标记设置。因为片头标记必须参与计划任务，不想存量全部扫。")]
-        public bool ScanIntroOnItemAdded { get; set; } = true;
+        public bool ScanIntroOnItemAdded { get; set; } = false;
 
-        [DisplayName("收藏时扫描片头")]
-        [Description("收藏时触发对应媒体片头检测，同上。")]
-        public bool ScanIntroOnFavorite { get; set; } = false;
+        [DisplayName("收藏入库时扫描片头")]
+        [Description("触发对应收藏媒体片头检测，同时入库收藏剧集时，扫描片头，同上。")]
+        public bool ScanIntroOnFavorite { get; set; } = true;
 
         [DisplayName("启用片头打标")]
         [Description("根据播放行为自动标记片头。")]
