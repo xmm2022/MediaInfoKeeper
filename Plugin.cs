@@ -751,35 +751,36 @@ namespace MediaInfoKeeper
                     {
                         if (!this.Options.GetMediaInfoOptions().ExtractMediaInfoOnItemAdded)
                         {
-                            this.logger.Info("已关闭入库时提取媒体信息，跳过");
-                            return;
+                            this.logger.Info($"已关闭入库提取媒体信息，跳过提取 item={e.Item.FileName ?? e.Item.Path}");
                         }
-
-                        // 恢复失败时先触发媒体信息提取，再写入 JSON。
-                        this.logger.Info($"入库媒体信息: 媒体信息缺失，开始提取 item={e.Item.FileName ?? e.Item.Path}");
-
-                        // 触发一次刷新以提取 MediaInfo。
-                        using (FfProcessGuard.Allow())
+                        else
                         {
-                            // 构建用于媒体信息提取的刷新参数与库选项。
-                            var metadataRefreshOptions = new MetadataRefreshOptions(this.directoryService)
-                            {
-                                EnableRemoteContentProbe = true,
-                                MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
-                                ImageRefreshMode = MetadataRefreshMode.FullRefresh,
-                                ReplaceAllMetadata = true,
-                                ReplaceAllImages = false
-                            };
+                            // 恢复失败时先触发媒体信息提取，再写入 JSON。
+                            this.logger.Info($"入库媒体信息: 媒体信息缺失，开始提取 item={e.Item.FileName ?? e.Item.Path}");
 
-                            var itemCollectionFolders = this.libraryManager.GetCollectionFolders(e.Item).Cast<BaseItem>().ToArray();
-                            var itemLibraryOptions = this.libraryManager.GetLibraryOptions(e.Item);
-                            e.Item.DateLastRefreshed = new DateTimeOffset();
-                            await RefreshTaskRunner.RunAsync(
-                                    () => this.providerManager
-                                        .RefreshSingleItem(e.Item, metadataRefreshOptions, itemCollectionFolders, itemLibraryOptions, CancellationToken.None))
-                                .ConfigureAwait(false);
+                            // 触发一次刷新以提取 MediaInfo。
+                            using (FfProcessGuard.Allow())
+                            {
+                                // 构建用于媒体信息提取的刷新参数与库选项。
+                                var metadataRefreshOptions = new MetadataRefreshOptions(this.directoryService)
+                                {
+                                    EnableRemoteContentProbe = true,
+                                    MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
+                                    ImageRefreshMode = MetadataRefreshMode.FullRefresh,
+                                    ReplaceAllMetadata = true,
+                                    ReplaceAllImages = false
+                                };
+
+                                var itemCollectionFolders = this.libraryManager.GetCollectionFolders(e.Item).Cast<BaseItem>().ToArray();
+                                var itemLibraryOptions = this.libraryManager.GetLibraryOptions(e.Item);
+                                e.Item.DateLastRefreshed = new DateTimeOffset();
+                                await RefreshTaskRunner.RunAsync(
+                                        () => this.providerManager
+                                            .RefreshSingleItem(e.Item, metadataRefreshOptions, itemCollectionFolders, itemLibraryOptions, CancellationToken.None))
+                                    .ConfigureAwait(false);
+                            }
+                            this.logger.Info($"入库媒体信息: 提取完成并写入 JSON item={e.Item.FileName ?? e.Item.Path}");
                         }
-                        this.logger.Info($"入库媒体信息: 提取完成并写入 JSON item={e.Item.FileName ?? e.Item.Path}");
                     }
                     // 使用Json媒体信息数据，恢复成功后扫描所在物理路径，确保库状态刷新。
                     else if (restoreResult == MediaInfoDocument.MediaInfoRestoreResult.Restored)
@@ -843,6 +844,7 @@ namespace MediaInfoKeeper
                     this.logger.Debug("已有 MediaInfo，覆盖写入 JSON");
                     MediaInfoPersist.OverWritePersistedMedia(e.Item);
                 }
+                
                 // 入库加入扫描片头队列
                 if (this.Options.IntroSkip?.ScanIntroOnItemAdded == true && e.Item is Episode episode)
                 {
@@ -868,7 +870,7 @@ namespace MediaInfoKeeper
                             {
                                 this.logger.Info($"已发送入库通知: 剧集={series.Name} {newEpisode.Name}, 通知用户数={sentCount}");
                             }
-                            // 开始执行扫描收藏片头,避免重复，判断未开启所有入库扫描
+                            // 开始执行扫描收藏媒体信息和片头,避免重复，判断未开启所有入库扫描
                             var canScanIntro = this.Options.IntroSkip?.ScanIntroOnFavorite == true && this.Options.IntroSkip?.ScanIntroOnItemAdded == false;
                             if (canScanIntro)
                             {

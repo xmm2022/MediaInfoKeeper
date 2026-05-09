@@ -27,11 +27,11 @@ namespace MediaInfoKeeper.Options
         public bool UnlockIntroSkip { get; set; } = true;
 
         [DisplayName("入库时扫描片头")]
-        [Description("新剧集入库时触发片头检测，不判断媒体库的片头标记设置。因为片头标记必须参与计划任务，不想存量全部扫。")]
+        [Description("新剧集入库时触发片头检测，不判断媒体库的片头标记设置。")]
         public bool ScanIntroOnItemAdded { get; set; } = false;
 
         [DisplayName("收藏入库时扫描片头")]
-        [Description("触发对应收藏媒体片头检测，同时入库收藏剧集时，扫描片头，同上。")]
+        [Description("触发对应收藏媒体片头检测，同时入库收藏剧集时，提取媒体信息，扫描片头。")]
         public bool ScanIntroOnFavorite { get; set; } = true;
 
         [DisplayName("启用片头打标")]
