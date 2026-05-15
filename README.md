@@ -35,7 +35,8 @@
 
 1. 下载 dll 文件：<https://github.com/honue/MediaInfoKeeper/releases/latest>
 2. 放入 Emby 配置目录中的 `plugins` 目录。
-3. 重启 Emby，在插件页面完成配置。
+3. 务必重命名为 `MediaInfoKeeper.dll`，否则后续自动更新会有两个 dll 存在。
+4. 重启 Emby，在插件页面完成配置。
 
 🧩 兼容性
 -----------
