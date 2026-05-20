@@ -31,6 +31,7 @@ namespace MediaInfoKeeper.Options.UIBaseClasses.Store
             "HidePersonOptionList",
             "FallbackLanguageList",
             "TvdbFallbackLanguageList",
+            "DanmuFetchModeList",
             "UpdateChannelList",
             "ProjectUrl",
             "VersionStatus",

@@ -168,10 +168,6 @@ namespace MediaInfoKeeper.Options
         [Description("控制是否输出详细网络请求日志，例如 HTTP 方法和最终请求地址。默认开启。")]
         public bool EnableDetailedNetworkRequestLogging { get; set; } = true;
 
-        [DisplayName("启动时输出配置日志")]
-        [Description("启用后，插件加载时会按分组输出当前配置快照。默认关闭，避免启动日志过长。")]
-        public bool LogOptionsOnStartup { get; set; } = false;
-
         [DisplayName("系统日志倒序显示")]
         [Description("将 /System/Logs 下日志接口的返回内容改为最新日志在前，不影响磁盘上的原始日志文件。")]
         public bool EnableSystemLogReverse { get; set; } = false;
@@ -289,7 +285,6 @@ namespace MediaInfoKeeper.Options
 
             AddGroup("日志", "",
                 nameof(EnableDetailedNetworkRequestLogging),
-                nameof(LogOptionsOnStartup),
                 nameof(EnableSystemLogReverse),
                 nameof(SystemLogNameBlacklist));
             
