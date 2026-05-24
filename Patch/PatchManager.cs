@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using MediaInfoKeeper.Options;
+using MediaBrowser.Model.Activity;
 using MediaBrowser.Model.Logging;
 
 namespace MediaInfoKeeper.Patch
@@ -36,14 +37,17 @@ namespace MediaInfoKeeper.Patch
 
         private static bool initialized;
         private static ILogger logger;
+        private static IActivityManager activityManager;
+        private static string lastReportedFailureKey;
 
         public static IReadOnlyCollection<PatchTracker> Trackers => trackers.AsReadOnly();
 
-        public static void Initialize(ILogger pluginLogger, PluginConfiguration options)
+        public static void Initialize(ILogger pluginLogger, PluginConfiguration options, IActivityManager pluginActivityManager = null)
         {
             lock (InitLock)
             {
                 logger = pluginLogger;
+                activityManager = pluginActivityManager;
                 var safeOptions = EnsureOptions(options);
 
                 if (!initialized)
@@ -102,6 +106,7 @@ namespace MediaInfoKeeper.Patch
                 }
 
                 LogTrackerSummary();
+                ReportFailedEnabledPatches();
             }
         }
 
@@ -745,6 +750,44 @@ namespace MediaInfoKeeper.Patch
                     logger?.Debug("补丁状态：{0}=禁用", tracker.Name);
                 }
             }
+        }
+
+        private static void ReportFailedEnabledPatches()
+        {
+            if (activityManager == null)
+            {
+                return;
+            }
+
+            var failedEnabledTrackers = trackers
+                .Where(t => t.IsEnabled && t.Health == PatchHealth.Failed)
+                .OrderBy(t => t.Name, StringComparer.Ordinal)
+                .ToArray();
+
+            if (failedEnabledTrackers.Length == 0)
+            {
+                lastReportedFailureKey = null;
+                return;
+            }
+
+            var failureKey = string.Join("|", failedEnabledTrackers.Select(t => t.Name + ":" + (t.Notes ?? string.Empty)));
+            if (string.Equals(lastReportedFailureKey, failureKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            lastReportedFailureKey = failureKey;
+
+            var failedPatchNames = string.Join(
+                "，",
+                failedEnabledTrackers.Select(t => t.Name));
+
+            activityManager.Create(new ActivityLogEntry
+            {
+                Name = Plugin.PluginName + " Patch 失效：" + failedPatchNames,
+                Type = "PluginPatchHealthFailed",
+                Severity = LogSeverity.Error
+            });
         }
     }
 }

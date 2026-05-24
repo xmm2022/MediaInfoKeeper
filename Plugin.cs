@@ -30,6 +30,7 @@ using MediaBrowser.Controller.Providers;
 using MediaBrowser.Controller.Session;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.MediaEncoding;
+using MediaBrowser.Model.Activity;
 using MediaBrowser.Model.Drawing;
 using MediaBrowser.Model.Globalization;
 using MediaBrowser.Model.IO;
@@ -123,6 +124,7 @@ namespace MediaInfoKeeper
             IUserDataManager userDataManager,
             ISessionManager sessionManager,
             INotificationManager notificationManager,
+            IActivityManager activityManager,
             IMediaMountManager mediaMountManager,
             IMediaSourceManager mediaSourceManager,
             IMediaProbeManager mediaProbeManager,
@@ -177,7 +179,7 @@ namespace MediaInfoKeeper
 
             var initialOptions = this.Options;
             PersistOptionsOnStartup(initialOptions);
-            PatchManager.Initialize(this.logger, initialOptions);
+            PatchManager.Initialize(this.logger, initialOptions, activityManager);
 
             this.PlugginEnabled = initialOptions.MainPage?.PlugginEnabled ?? true;
             LogOptionsSnapshot(initialOptions, "已加载");
