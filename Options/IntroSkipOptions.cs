@@ -35,7 +35,7 @@ namespace MediaInfoKeeper.Options
         public bool ScanIntroOnFavorite { get; set; } = true;
 
         [DisplayName("过滤普通章节")]
-        [Description("拦截 Emby/ffprobe 写入的普通 Chapter 01/02 等章节，仅保留片头片尾标记。关闭后将允许资源自带章节正常入库。")]
+        [Description("阻止 Emby/ffprobe 写入Chapter 01/02 等无效章节。")]
         public bool FilterPlainChapters { get; set; } = true;
         
         [DisplayName("启用片头打标")]
