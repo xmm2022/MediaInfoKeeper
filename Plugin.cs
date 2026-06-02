@@ -77,13 +77,11 @@ namespace MediaInfoKeeper
         private readonly ISessionManager sessionManager;
         private readonly IMediaMountManager mediaMountManager;
         private readonly IApplicationHost applicationHost;
-        private readonly DirectoryService directoryService;
         private readonly ReleaseInfoService releaseInfoService;
 
         internal static IProviderManager ProviderManager { get; private set; }
         internal static IFileSystem FileSystem { get; private set; }
         internal static ILibraryManager LibraryManager { get; private set; }
-        internal static IDirectoryService DirectoryService { get; private set; }
         internal static IHttpClient SharedHttpClient { get; private set; }
         internal static ILogger SharedLogger { get; private set; }
         internal IApplicationHost AppHost => this.applicationHost;
@@ -133,7 +131,6 @@ namespace MediaInfoKeeper
             this.providerManager = providerManager;
             this.itemRepository = itemRepository;
             this.fileSystem = fileSystem;
-            this.directoryService = new DirectoryService(this.logger, fileSystem);
             this.userManager = userManager;
             this.userDataManager = userDataManager;
             this.sessionManager = sessionManager;
@@ -143,7 +140,6 @@ namespace MediaInfoKeeper
             ProviderManager = providerManager;
             FileSystem = fileSystem;
             LibraryManager = libraryManager;
-            DirectoryService = this.directoryService;
             SharedHttpClient = httpClient;
             SharedLogger = this.logger;
 
@@ -600,7 +596,7 @@ namespace MediaInfoKeeper
                             using (FfProcessGuard.Allow())
                             {
                                 // 构建用于媒体信息提取的刷新参数与库选项。
-                                var metadataRefreshOptions = new MetadataRefreshOptions(this.directoryService)
+                                var metadataRefreshOptions = new MetadataRefreshOptions(new DirectoryService(this.logger, this.fileSystem))
                                 {
                                     EnableRemoteContentProbe = true,
                                     MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
@@ -645,7 +641,7 @@ namespace MediaInfoKeeper
                             else
                             {
                                 // 仅触发目录校验/发现，不做元数据覆盖与远端抓取。
-                                var discoverOnlyOptions = new MetadataRefreshOptions(this.directoryService)
+                                var discoverOnlyOptions = new MetadataRefreshOptions(new DirectoryService(this.logger, this.fileSystem))
                                 {
                                     EnableRemoteContentProbe = false,
                                     MetadataRefreshMode = MetadataRefreshMode.ValidationOnly,
@@ -815,7 +811,7 @@ namespace MediaInfoKeeper
             }
 
             logger.Info("同步删除 媒体信息 Json");
-            MediaInfoDocument.DeleteMediaInfoJson(e.Item, this.directoryService, "Item Removed Event");
+            MediaInfoDocument.DeleteMediaInfoJson(e.Item, new DirectoryService(this.logger, this.fileSystem), "Item Removed Event");
         }
 
         private string GetCurrentVersion()

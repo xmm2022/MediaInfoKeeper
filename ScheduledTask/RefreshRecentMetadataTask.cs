@@ -153,7 +153,7 @@ namespace MediaInfoKeeper.ScheduledTask
 
         private MetadataRefreshOptions BuildRefreshOptions(bool replaceMetadata, bool replaceImages, bool replaceThumbnails)
         {
-            return new MetadataRefreshOptions(Plugin.DirectoryService)
+            return new MetadataRefreshOptions(new DirectoryService(this.logger, Plugin.FileSystem))
             {
                 EnableRemoteContentProbe = true,
                 MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
@@ -161,7 +161,8 @@ namespace MediaInfoKeeper.ScheduledTask
                 ReplaceAllMetadata = replaceMetadata,
                 ReplaceAllImages = replaceImages,
                 ReplaceThumbnailImages = replaceThumbnails,
-                EnableThumbnailImageExtraction = Plugin.Instance.Options.MetaData.EnableImageCapture
+                EnableThumbnailImageExtraction = Plugin.Instance.Options.MetaData.EnableImageCapture,
+                IsAutomated = true
             };
         }
 

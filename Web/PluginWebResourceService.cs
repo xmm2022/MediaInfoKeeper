@@ -238,7 +238,7 @@ namespace MediaInfoKeeper.Web
             var primaryMediaSource = Plugin.MediaInfoService
                 .GetStaticMediaSources(item, false)
                 .FirstOrDefault();
-            var directoryService = Plugin.DirectoryService;
+            var directoryService = new DirectoryService(Plugin.SharedLogger, Plugin.FileSystem);
             var primaryImage = BuildPrimaryImageInfo(item);
             var chapterImages = BuildChapterImagesInfo(item);
             var thumbnailSets = BuildThumbnailSetsInfo(item, directoryService);

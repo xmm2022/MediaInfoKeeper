@@ -181,7 +181,7 @@ namespace MediaInfoKeeper.Patch
 
         public MetadataRefreshOptions GetRefreshOptions()
         {
-            return new MetadataRefreshOptions(Plugin.DirectoryService)
+            return new MetadataRefreshOptions(new DirectoryService(this.logger, this.fileSystem))
             {
                 EnableRemoteContentProbe = true,
                 MetadataRefreshMode = MetadataRefreshMode.ValidationOnly,

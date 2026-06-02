@@ -6,6 +6,7 @@ using System.Threading;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Serialization;
@@ -194,7 +195,7 @@ namespace MediaInfoKeeper.Store
                         ImageType.Primary,
                         null,
                         Array.Empty<long>(),
-                        Plugin.DirectoryService,
+                        new DirectoryService(this.logger, Plugin.FileSystem),
                         updateImageCache: true,
                         CancellationToken.None)
                     .GetAwaiter()

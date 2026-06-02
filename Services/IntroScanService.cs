@@ -233,7 +233,7 @@ namespace MediaInfoKeeper.Services
 
             try
             {
-                var metadataRefreshOptions = new MetadataRefreshOptions(Plugin.DirectoryService)
+                var metadataRefreshOptions = new MetadataRefreshOptions(new DirectoryService(this.logger, this.fileSystem))
                 {
                     EnableRemoteContentProbe = true,
                     MetadataRefreshMode = MetadataRefreshMode.ValidationOnly,
@@ -641,7 +641,7 @@ namespace MediaInfoKeeper.Services
                 return false;
             }
 
-            var directoryService = Plugin.DirectoryService;
+            var directoryService = new DirectoryService(this.logger, this.fileSystem);
             var libraryOptions = this.libraryManager.GetLibraryOptions(episode);
             var hasLibraryOptions = libraryOptions != null;
             this.logger.Debug($"LibraryOptions loaded: null={!hasLibraryOptions}");

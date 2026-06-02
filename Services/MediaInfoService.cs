@@ -71,7 +71,7 @@ namespace MediaInfoKeeper.Services
         /// <summary>构建 MediaInfo 提取所需的刷新选项。</summary>
         public MetadataRefreshOptions GetMediaInfoRefreshOptions()
         {
-            return new MetadataRefreshOptions(Plugin.DirectoryService)
+            return new MetadataRefreshOptions(new DirectoryService(this.logger, this.fileSystem))
             {
                 EnableRemoteContentProbe = true,
                 MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
