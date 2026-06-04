@@ -4,7 +4,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Controller.Entities;
-using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Persistence;
@@ -95,7 +94,7 @@ namespace MediaInfoKeeper.ScheduledTask
 
             if (metadataRefreshTargets.Count > 0)
             {
-                this.logger.Info($"计划任务刷新豆瓣角色中文化 {metadataRefreshTargets.Count} 个 Movie/Series");
+                this.logger.Info($"计划任务刷新豆瓣角色中文化 {metadataRefreshTargets.Count} 个 Series");
             }
             foreach (var target in metadataRefreshTargets)
             {
@@ -263,7 +262,6 @@ namespace MediaInfoKeeper.ScheduledTask
             {
                 BaseItem refreshItem = item switch
                 {
-                    Movie movie when movie.InternalId > 0 => movie,
                     Series series when series.InternalId > 0 => series,
                     Season season when season.Series?.InternalId > 0 => season.Series,
                     Episode episode when episode.Series?.InternalId > 0 => episode.Series,
