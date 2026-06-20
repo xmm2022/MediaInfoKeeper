@@ -30,6 +30,7 @@ namespace MediaInfoKeeper.Patch
         private static Type raw;
         private static MethodInfo sqlite3_enable_load_extension;
         private static FieldInfo sqlite3_db;
+        private static PropertyInfo sqliteParentConnection;
         private static MethodInfo createConnection;
         private static PropertyInfo dbFilePath;
         private static MethodInfo getJoinCommandText;
@@ -45,6 +46,7 @@ namespace MediaInfoKeeper.Patch
         private static bool isConnectionPatched;
         private static bool areSearchFunctionsPatched;
         private static bool patchPhase2Initialized;
+        private static bool patchPhase2Completed;
         private static bool enhanceChineseSearchEnabled;
         private static bool enhanceChineseSearchRestoreEnabled;
         private static bool excludeOriginalTitleFromSearch;
@@ -118,6 +120,8 @@ namespace MediaInfoKeeper.Patch
 
                     sqlite3_db = typeof(SQLiteDatabaseConnection)
                         .GetField("db", BindingFlags.NonPublic | BindingFlags.Instance);
+                    sqliteParentConnection = typeof(SQLiteDatabaseConnection)
+                        .GetProperty("ParentConnection", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
                     var embySqlite = Assembly.Load("Emby.Sqlite");
                     var baseSqliteRepository = embySqlite.GetType("Emby.Sqlite.BaseSqliteRepository");
@@ -363,9 +367,15 @@ namespace MediaInfoKeeper.Patch
             }
         }
 
-        private static void PatchPhase2(IDatabaseConnection connection)
+        private static bool PatchPhase2(IDatabaseConnection connection)
         {
             const string ftsTableName = "fts_search9";
+            if (!HasRequiredSchema(connection, ftsTableName))
+            {
+                logger?.Info("增强搜索 - 数据库结构尚未就绪，延后初始化。");
+                return false;
+            }
+
             var rebuildFtsResult = true;
             var patchSearchFunctionsResult = false;
             var shouldLogLoadSuccess = false;
@@ -449,6 +459,7 @@ namespace MediaInfoKeeper.Patch
             }
 
             logger?.Info($"增强搜索 - 当前分词器（处理后）：{CurrentTokenizerName}");
+            return true;
         }
 
         private static string DetectCurrentTokenizer(IDatabaseConnection connection, string ftsTableName)
@@ -475,6 +486,28 @@ namespace MediaInfoKeeper.Patch
             }
 
             return "unknown";
+        }
+
+        private static bool HasRequiredSchema(IDatabaseConnection connection, string ftsTableName)
+        {
+            if (connection == null)
+            {
+                return false;
+            }
+
+            using (var statement = connection.PrepareStatement(@"
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name IN ('MediaItems', 'fts_search9');"))
+            {
+                if (statement.MoveNext())
+                {
+                    return statement.Current.GetInt(0) == 2;
+                }
+            }
+
+            return false;
         }
 
         public static bool RebuildSearchIndex()
@@ -851,7 +884,7 @@ namespace MediaInfoKeeper.Patch
                 return false;
             }
 
-            var connectionKey = RuntimeHelpers.GetHashCode(connection);
+            var connectionKey = GetTokenizerConnectionKey(connection);
             lock (TokenizerStateLock)
             {
                 if (tokenizerLoadedConnections.Contains(connectionKey))
@@ -893,6 +926,15 @@ namespace MediaInfoKeeper.Patch
             return false;
         }
 
+        private static int GetTokenizerConnectionKey(IDatabaseConnection connection)
+        {
+            var sqliteConnection = connection as SQLiteDatabaseConnection;
+            var keySource = sqliteConnection == null
+                ? connection
+                : sqliteParentConnection?.GetValue(sqliteConnection) ?? connection;
+            return RuntimeHelpers.GetHashCode(keySource);
+        }
+
         private static void HandleConnectionCreated(object repositoryInstance, bool isReadOnly, IDatabaseConnection connection)
         {
             var db = dbFilePath.GetValue(repositoryInstance) as string;
@@ -904,20 +946,27 @@ namespace MediaInfoKeeper.Patch
             // Emby 4.9 连接池会持续创建/复用新连接，simple 扩展必须按连接加载。
             LoadTokenizerExtension(connection, false);
 
-            if (isReadOnly || patchPhase2Initialized)
+            if (isReadOnly || patchPhase2Completed)
             {
                 return;
             }
 
             lock (PhaseLock)
             {
-                if (patchPhase2Initialized)
+                if (patchPhase2Completed || patchPhase2Initialized)
                 {
                     return;
                 }
 
-                PatchPhase2(connection);
                 patchPhase2Initialized = true;
+                try
+                {
+                    patchPhase2Completed = PatchPhase2(connection);
+                }
+                finally
+                {
+                    patchPhase2Initialized = false;
+                }
             }
         }
 
