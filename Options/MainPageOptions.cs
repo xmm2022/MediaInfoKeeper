@@ -430,7 +430,7 @@ namespace MediaInfoKeeper.Options
                 nameof(FileChangeRefreshDelaySeconds),
                 nameof(CatchupLibraries));
 
-            AddGroup("计划任务配置", "配置页面的保存按钮无效，在本页面需要再次点击保存。",
+            AddGroup("计划任务配置", string.Empty,
                 nameof(ScheduledTaskEntries),
                 nameof(UpdatePluginVersionStatus),
                 nameof(UpdatePluginProjectUrl),

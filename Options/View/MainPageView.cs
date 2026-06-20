@@ -148,6 +148,17 @@ namespace MediaInfoKeeper.Options.View
             return await base.OnSaveCommand(itemId, commandId, data).ConfigureAwait(false);
         }
 
+        public override void OnDialogResult(IPluginUIView dialogView, bool completedOk, object data)
+        {
+            base.OnDialogResult(dialogView, completedOk, data);
+            if (!completedOk)
+            {
+                return;
+            }
+
+            this.store.SetOptions(this.Options);
+        }
+
         private Task<IPluginUIView> RunScheduledTaskAsync<TTask>()
             where TTask : IScheduledTask
         {
