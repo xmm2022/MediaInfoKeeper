@@ -8,11 +8,10 @@ using Emby.Web.GenericEdit.Common;
 using MediaInfoKeeper.Common;
 using Microsoft.Extensions.Caching.Memory;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Playlists;
-using MediaBrowser.Controller.Providers;
-using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Model.Logging;
@@ -22,33 +21,8 @@ namespace MediaInfoKeeper.Services
 {
     public class LibraryService
     {
-        private sealed class FileSystemMetadataComparer : IEqualityComparer<FileSystemMetadata>
-        {
-            public bool Equals(FileSystemMetadata x, FileSystemMetadata y)
-            {
-                if (x == null || y == null)
-                {
-                    return false;
-                }
-
-                return x.IsDirectory == y.IsDirectory &&
-                       string.Equals(x.FullName, y.FullName, StringComparison.OrdinalIgnoreCase);
-            }
-
-            public int GetHashCode(FileSystemMetadata obj)
-            {
-                if (obj == null || string.IsNullOrEmpty(obj.FullName))
-                {
-                    return 0;
-                }
-
-                return StringComparer.OrdinalIgnoreCase.GetHashCode(obj.FullName) ^ obj.IsDirectory.GetHashCode();
-            }
-        }
-
         private readonly ILogger logger;
         private readonly ILibraryManager libraryManager;
-        private readonly IProviderManager providerManager;
         private readonly IFileSystem fileSystem;
         private readonly IUserManager userManager;
         private readonly IUserDataManager userDataManager;
@@ -65,7 +39,6 @@ namespace MediaInfoKeeper.Services
         /// <summary>创建库处理辅助类并注入所需服务。</summary>
         public LibraryService(
             ILibraryManager libraryManager,
-            IProviderManager providerManager,
             IFileSystem fileSystem,
             IUserManager userManager,
             IUserDataManager userDataManager,
@@ -73,7 +46,6 @@ namespace MediaInfoKeeper.Services
         {
             this.logger = Plugin.SharedLogger;
             this.libraryManager = libraryManager;
-            this.providerManager = providerManager;
             this.fileSystem = fileSystem;
             this.userManager = userManager;
             this.userDataManager = userDataManager;
@@ -142,7 +114,7 @@ namespace MediaInfoKeeper.Services
             return displayParent?.HasImage(ImageType.Primary) == true;
         }
 
-        public IReadOnlyCollection<User> GetAllUsers(bool refresh = true)
+        private IReadOnlyCollection<User> GetAllUsers(bool refresh = true)
         {
             if (refresh)
             {
@@ -156,20 +128,6 @@ namespace MediaInfoKeeper.Services
         {
             RefreshUsers();
             return this.adminOrderedViews;
-        }
-
-        public bool HasFileChanged(BaseItem item, IDirectoryService directoryService)
-        {
-            if (item?.IsFileProtocol == true)
-            {
-                var file = directoryService.GetFile(item.Path);
-                if (file != null && item.HasDateModifiedChanged(file.LastWriteTimeUtc))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         /// <summary>根据追更媒体库配置判断条目是否属于命中范围。</summary>
@@ -344,6 +302,98 @@ namespace MediaInfoKeeper.Services
             }
 
             return items.ToList();
+        }
+
+        public List<BaseItem> ExpandItem(IEnumerable<string> ids)
+        {
+            var targets = new List<BaseItem>();
+            var known = new HashSet<long>();
+
+            foreach (var id in ids.Where(i => !string.IsNullOrWhiteSpace(i)))
+            {
+                var item = this.libraryManager.GetItemById(id);
+                if (item == null)
+                {
+                    continue;
+                }
+
+                if (item is Episode episode)
+                {
+                    if (episode.ExtraType == null && known.Add(episode.InternalId))
+                    {
+                        targets.Add(episode);
+                    }
+
+                    continue;
+                }
+
+                if (item is Video video)
+                {
+                    if (video.ExtraType == null && known.Add(video.InternalId))
+                    {
+                        targets.Add(video);
+                    }
+
+                    continue;
+                }
+
+                if (item is Audio audio)
+                {
+                    if (audio.ExtraType == null && known.Add(audio.InternalId))
+                    {
+                        targets.Add(audio);
+                    }
+
+                    continue;
+                }
+
+                if (item is MusicAlbum || item is MusicArtist || item is MusicGenre)
+                {
+                    foreach (var audioItem in ExpandToAudioItems(item))
+                    {
+                        if (audioItem.ExtraType == null && known.Add(audioItem.InternalId))
+                        {
+                            targets.Add(audioItem);
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (!(item is Series || item is Season))
+                {
+                    continue;
+                }
+
+                var episodes = GetSeriesEpisodesFromItem(item);
+                foreach (var episodeItem in episodes)
+                {
+                    if (episodeItem?.ExtraType == null && known.Add(episodeItem.InternalId))
+                    {
+                        targets.Add(episodeItem);
+                    }
+                }
+            }
+
+            return targets;
+        }
+
+        private IEnumerable<Audio> ExpandToAudioItems(BaseItem item)
+        {
+            if (item == null)
+            {
+                return Array.Empty<Audio>();
+            }
+
+            return this.libraryManager.GetItemList(new InternalItemsQuery
+                {
+                    Recursive = true,
+                    HasPath = true,
+                    MediaTypes = new[] { MediaType.Audio },
+                    IncludeItemTypes = new[] { nameof(Audio) },
+                    ParentIds = new[] { item.InternalId }
+                })
+                .OfType<Audio>();
         }
 
         /// <summary>获取计划任务媒体库范围内的音视频条目。</summary>
@@ -1160,97 +1210,28 @@ namespace MediaInfoKeeper.Services
             return !Directory.EnumerateFileSystemEntries(path).Any();
         }
 
-        /// <summary>复制库配置，用于元数据刷新流程。</summary>
-        public static LibraryOptions CopyLibraryOptions(LibraryOptions sourceOptions)
+        private sealed class FileSystemMetadataComparer : IEqualityComparer<FileSystemMetadata>
         {
-            var targetOptions = new LibraryOptions
+            public bool Equals(FileSystemMetadata x, FileSystemMetadata y)
             {
-                EnableArchiveMediaFiles = sourceOptions.EnableArchiveMediaFiles,
-                EnablePhotos = sourceOptions.EnablePhotos,
-                EnableRealtimeMonitor = sourceOptions.EnableRealtimeMonitor,
-                EnableMarkerDetection = sourceOptions.EnableMarkerDetection,
-                EnableMarkerDetectionDuringLibraryScan = sourceOptions.EnableMarkerDetectionDuringLibraryScan,
-                IntroDetectionFingerprintLength = sourceOptions.IntroDetectionFingerprintLength,
-                EnableChapterImageExtraction = sourceOptions.EnableChapterImageExtraction,
-                ExtractChapterImagesDuringLibraryScan = sourceOptions.ExtractChapterImagesDuringLibraryScan,
-                DownloadImagesInAdvance = sourceOptions.DownloadImagesInAdvance,
-                CacheImages = sourceOptions.CacheImages,
-                PathInfos =
-                    sourceOptions.PathInfos?.Select(p => new MediaPathInfo
-                    {
-                        Path = p.Path,
-                        NetworkPath = p.NetworkPath,
-                        Username = p.Username,
-                        Password = p.Password
-                    })
-                        .ToArray() ?? Array.Empty<MediaPathInfo>(),
-                IgnoreHiddenFiles = sourceOptions.IgnoreHiddenFiles,
-                IgnoreFileExtensions =
-                    sourceOptions.IgnoreFileExtensions?.Clone() as string[] ?? Array.Empty<string>(),
-                SaveLocalMetadata = sourceOptions.SaveLocalMetadata,
-                SaveMetadataHidden = sourceOptions.SaveMetadataHidden,
-                SaveLocalThumbnailSets = sourceOptions.SaveLocalThumbnailSets,
-                ImportPlaylists = sourceOptions.ImportPlaylists,
-                EnableAutomaticSeriesGrouping = sourceOptions.EnableAutomaticSeriesGrouping,
-                ShareEmbeddedMusicAlbumImages = sourceOptions.ShareEmbeddedMusicAlbumImages,
-                EnableEmbeddedTitles = sourceOptions.EnableEmbeddedTitles,
-                EnableAudioResume = sourceOptions.EnableAudioResume,
-                AutoGenerateChapters = sourceOptions.AutoGenerateChapters,
-                AutomaticRefreshIntervalDays = sourceOptions.AutomaticRefreshIntervalDays,
-                PlaceholderMetadataRefreshIntervalDays = sourceOptions.PlaceholderMetadataRefreshIntervalDays,
-                PreferredMetadataLanguage = sourceOptions.PreferredMetadataLanguage,
-                PreferredImageLanguage = sourceOptions.PreferredImageLanguage,
-                ContentType = sourceOptions.ContentType,
-                MetadataCountryCode = sourceOptions.MetadataCountryCode,
-                MetadataSavers = sourceOptions.MetadataSavers?.Clone() as string[] ?? Array.Empty<string>(),
-                DisabledLocalMetadataReaders =
-                    sourceOptions.DisabledLocalMetadataReaders?.Clone() as string[] ?? Array.Empty<string>(),
-                LocalMetadataReaderOrder = sourceOptions.LocalMetadataReaderOrder?.Clone() as string[] ?? null,
-                DisabledLyricsFetchers =
-                    sourceOptions.DisabledLyricsFetchers?.Clone() as string[] ?? Array.Empty<string>(),
-                SaveLyricsWithMedia = sourceOptions.SaveLyricsWithMedia,
-                LyricsDownloadMaxAgeDays = sourceOptions.LyricsDownloadMaxAgeDays,
-                LyricsFetcherOrder = sourceOptions.LyricsFetcherOrder?.Clone() as string[] ?? Array.Empty<string>(),
-                LyricsDownloadLanguages =
-                    sourceOptions.LyricsDownloadLanguages?.Clone() as string[] ?? Array.Empty<string>(),
-                DisabledSubtitleFetchers =
-                    sourceOptions.DisabledSubtitleFetchers?.Clone() as string[] ?? Array.Empty<string>(),
-                SubtitleFetcherOrder =
-                    sourceOptions.SubtitleFetcherOrder?.Clone() as string[] ?? Array.Empty<string>(),
-                SkipSubtitlesIfEmbeddedSubtitlesPresent = sourceOptions.SkipSubtitlesIfEmbeddedSubtitlesPresent,
-                SkipSubtitlesIfAudioTrackMatches = sourceOptions.SkipSubtitlesIfAudioTrackMatches,
-                SubtitleDownloadLanguages =
-                    sourceOptions.SubtitleDownloadLanguages?.Clone() as string[] ?? Array.Empty<string>(),
-                SubtitleDownloadMaxAgeDays = sourceOptions.SubtitleDownloadMaxAgeDays,
-                RequirePerfectSubtitleMatch = sourceOptions.RequirePerfectSubtitleMatch,
-                SaveSubtitlesWithMedia = sourceOptions.SaveSubtitlesWithMedia,
-                ForcedSubtitlesOnly = sourceOptions.ForcedSubtitlesOnly,
-                HearingImpairedSubtitlesOnly = sourceOptions.HearingImpairedSubtitlesOnly,
-                CollapseSingleItemFolders = sourceOptions.CollapseSingleItemFolders,
-                EnableAdultMetadata = sourceOptions.EnableAdultMetadata,
-                ImportCollections = sourceOptions.ImportCollections,
-                MinCollectionItems = sourceOptions.MinCollectionItems,
-                MusicFolderStructure = sourceOptions.MusicFolderStructure,
-                MinResumePct = sourceOptions.MinResumePct,
-                MaxResumePct = sourceOptions.MaxResumePct,
-                MinResumeDurationSeconds = sourceOptions.MinResumeDurationSeconds,
-                ThumbnailImagesIntervalSeconds = sourceOptions.ThumbnailImagesIntervalSeconds,
-                SampleIgnoreSize = sourceOptions.SampleIgnoreSize,
-                TypeOptions = sourceOptions.TypeOptions.Select(t => new TypeOptions
+                if (x == null || y == null)
                 {
-                    Type = t.Type,
-                    MetadataFetchers = t.MetadataFetchers?.Clone() as string[] ?? Array.Empty<string>(),
-                    MetadataFetcherOrder = t.MetadataFetcherOrder?.Clone() as string[] ?? Array.Empty<string>(),
-                    ImageFetchers = t.ImageFetchers?.Clone() as string[] ?? Array.Empty<string>(),
-                    ImageFetcherOrder = t.ImageFetcherOrder?.Clone() as string[] ?? Array.Empty<string>(),
-                    ImageOptions = t.ImageOptions?.Select(i =>
-                            new ImageOption { Type = i.Type, Limit = i.Limit, MinWidth = i.MinWidth })
-                            .ToArray() ?? Array.Empty<ImageOption>()
-                })
-                    .ToArray()
-            };
+                    return false;
+                }
 
-            return targetOptions;
+                return x.IsDirectory == y.IsDirectory &&
+                       string.Equals(x.FullName, y.FullName, StringComparison.OrdinalIgnoreCase);
+            }
+
+            public int GetHashCode(FileSystemMetadata obj)
+            {
+                if (obj == null || string.IsNullOrEmpty(obj.FullName))
+                {
+                    return 0;
+                }
+
+                return StringComparer.OrdinalIgnoreCase.GetHashCode(obj.FullName) ^ obj.IsDirectory.GetHashCode();
+            }
         }
     }
 }

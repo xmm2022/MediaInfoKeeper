@@ -46,13 +46,13 @@ namespace MediaInfoKeeper.Web
             _libraryManager = libraryManager;
             _itemRepository = itemRepository;
             _jsonSerializer = jsonSerializer;
-            _extractHandler = new ExtractMediaInfoRouteHandler(ExpandToTargetItems);
-            _deletePersistHandler = new DeleteMediaInfoPersistRouteHandler(ExpandToTargetItems, libraryManager, itemRepository);
-            _scanIntroHandler = new ScanIntroRouteHandler(ExpandToTargetItems);
-            _scanExternalFilesHandler = new ScanExternalFilesRouteHandler(ExpandToTargetItems);
-            _downloadDanmuHandler = new DownloadDanmuRouteHandler(ExpandToTargetItems);
-            _setIntroHandler = new SetIntroRouteHandler(ExpandToTargetItems, libraryManager, itemRepository);
-            _clearIntroHandler = new ClearIntroRouteHandler(ExpandToTargetItems, libraryManager, itemRepository);
+            _extractHandler = new ExtractMediaInfoRouteHandler(Plugin.LibraryService.ExpandItem);
+            _deletePersistHandler = new DeleteMediaInfoPersistRouteHandler(Plugin.LibraryService.ExpandItem, libraryManager, itemRepository);
+            _scanIntroHandler = new ScanIntroRouteHandler(Plugin.LibraryService.ExpandItem);
+            _scanExternalFilesHandler = new ScanExternalFilesRouteHandler(Plugin.LibraryService.ExpandItem);
+            _downloadDanmuHandler = new DownloadDanmuRouteHandler(Plugin.LibraryService.ExpandItem);
+            _setIntroHandler = new SetIntroRouteHandler(Plugin.LibraryService.ExpandItem, libraryManager, itemRepository);
+            _clearIntroHandler = new ClearIntroRouteHandler(Plugin.LibraryService.ExpandItem, libraryManager, itemRepository);
         }
 
         public IRequest Request { get; set; }
@@ -388,98 +388,6 @@ namespace MediaInfoKeeper.Web
         private static bool DirectoryExists(string path)
         {
             return !string.IsNullOrWhiteSpace(path) && Directory.Exists(path);
-        }
-
-        private List<BaseItem> ExpandToTargetItems(IEnumerable<string> ids)
-        {
-            var targets = new List<BaseItem>();
-            var known = new HashSet<long>();
-
-            foreach (var id in ids.Where(i => !string.IsNullOrWhiteSpace(i)))
-            {
-                var item = _libraryManager.GetItemById(id);
-                if (item == null)
-                {
-                    continue;
-                }
-
-                if (item is Episode episode)
-                {
-                    if (episode.ExtraType == null && known.Add(episode.InternalId))
-                    {
-                        targets.Add(episode);
-                    }
-
-                    continue;
-                }
-
-                if (item is Video video)
-                {
-                    if (video.ExtraType == null && known.Add(video.InternalId))
-                    {
-                        targets.Add(video);
-                    }
-
-                    continue;
-                }
-
-                if (item is Audio audio)
-                {
-                    if (audio.ExtraType == null && known.Add(audio.InternalId))
-                    {
-                        targets.Add(audio);
-                    }
-
-                    continue;
-                }
-
-                if (item is MusicAlbum || item is MusicArtist || item is MusicGenre)
-                {
-                    foreach (var audioItem in ExpandToAudioItems(item))
-                    {
-                        if (audioItem.ExtraType == null && known.Add(audioItem.InternalId))
-                        {
-                            targets.Add(audioItem);
-                        }
-                    }
-
-                    continue;
-                }
-
-                if (!(item is Series || item is Season))
-                {
-                    continue;
-                }
-
-                var episodes = Plugin.LibraryService.GetSeriesEpisodesFromItem(item);
-                foreach (var episodeItem in episodes)
-                {
-                    if (episodeItem?.ExtraType == null && known.Add(episodeItem.InternalId))
-                    {
-                        targets.Add(episodeItem);
-                    }
-                }
-            }
-
-            return targets;
-        }
-
-        private IEnumerable<Audio> ExpandToAudioItems(BaseItem item)
-        {
-            if (item == null)
-            {
-                return Array.Empty<Audio>();
-            }
-
-            return _libraryManager.GetItemList(new InternalItemsQuery
-                {
-                    Recursive = true,
-                    HasPath = true,
-                    MediaTypes = new[] { MediaBrowser.Model.Entities.MediaType.Audio },
-                    IncludeItemTypes = new[] { nameof(Audio) },
-                    ParentIds = new[] { item.InternalId }
-                })
-                .OfType<Audio>();
         }
 
         private T ReadJsonFile<T>(string path) where T : class
