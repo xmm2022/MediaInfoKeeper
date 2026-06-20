@@ -297,6 +297,7 @@ namespace MediaInfoKeeper
             options.MetaData.Initialize();
 
             var list = LibraryService.BuildLibrarySelectOptions();
+            NormalizeScopedLibraryOptions(options);
             options.MainPage.LibraryList = list;
             options.IntroSkip.LibraryList = list;
             options.MainPage.UpdatePluginVersionStatus = BuildVersionStatusItem();
@@ -434,26 +435,40 @@ namespace MediaInfoKeeper
             effectiveUpdatePluginOptions.Initialize();
             options.MainPage.ScheduledTasksEditor.UpdatePlugin = effectiveUpdatePluginOptions;
 
+            NormalizeScopedLibraryOptions(options);
+        }
+
+        private void NormalizeScopedLibraryOptions(PluginConfiguration options)
+        {
+            if (options?.MainPage == null)
+            {
+                return;
+            }
+
             options.MainPage.CatchupLibraries = NormalizeScopedLibraries(options.MainPage.CatchupLibraries);
             var scheduledTasksEditor = options.MainPage.ScheduledTasksEditor;
-            scheduledTasksEditor.RefreshRecentMetadata.RefreshRecentMetadataLibraries =
-                NormalizeScopedLibraries(scheduledTasksEditor.RefreshRecentMetadata.RefreshRecentMetadataLibraries);
-            scheduledTasksEditor.ScanRecentIntro.ScanRecentIntroLibraries =
-                NormalizeScopedLibraries(scheduledTasksEditor.ScanRecentIntro.ScanRecentIntroLibraries);
-            scheduledTasksEditor.ExtractRecentMediaInfo.ExtractRecentMediaInfoLibraries =
-                NormalizeScopedLibraries(scheduledTasksEditor.ExtractRecentMediaInfo.ExtractRecentMediaInfoLibraries);
-            scheduledTasksEditor.ExportExistingMediaInfo.ExportExistingMediaInfoLibraries =
-                NormalizeScopedLibraries(scheduledTasksEditor.ExportExistingMediaInfo.ExportExistingMediaInfoLibraries);
-            scheduledTasksEditor.RestoreMediaInfo.RestoreMediaInfoLibraries =
-                NormalizeScopedLibraries(scheduledTasksEditor.RestoreMediaInfo.RestoreMediaInfoLibraries);
-            scheduledTasksEditor.ScanExternalFiles.ScanExternalFilesLibraries =
-                NormalizeScopedLibraries(scheduledTasksEditor.ScanExternalFiles.ScanExternalFilesLibraries);
+            if (scheduledTasksEditor != null)
+            {
+                scheduledTasksEditor.RefreshRecentMetadata.RefreshRecentMetadataLibraries =
+                    NormalizeScopedLibraries(scheduledTasksEditor.RefreshRecentMetadata.RefreshRecentMetadataLibraries);
+                scheduledTasksEditor.ScanRecentIntro.ScanRecentIntroLibraries =
+                    NormalizeScopedLibraries(scheduledTasksEditor.ScanRecentIntro.ScanRecentIntroLibraries);
+                scheduledTasksEditor.ExtractRecentMediaInfo.ExtractRecentMediaInfoLibraries =
+                    NormalizeScopedLibraries(scheduledTasksEditor.ExtractRecentMediaInfo.ExtractRecentMediaInfoLibraries);
+                scheduledTasksEditor.ExportExistingMediaInfo.ExportExistingMediaInfoLibraries =
+                    NormalizeScopedLibraries(scheduledTasksEditor.ExportExistingMediaInfo.ExportExistingMediaInfoLibraries);
+                scheduledTasksEditor.RestoreMediaInfo.RestoreMediaInfoLibraries =
+                    NormalizeScopedLibraries(scheduledTasksEditor.RestoreMediaInfo.RestoreMediaInfoLibraries);
+                scheduledTasksEditor.ScanExternalFiles.ScanExternalFilesLibraries =
+                    NormalizeScopedLibraries(scheduledTasksEditor.ScanExternalFiles.ScanExternalFilesLibraries);
+            }
 
             if (options.IntroSkip != null)
             {
                 options.IntroSkip.LibraryScope = NormalizeScopedLibraries(options.IntroSkip.LibraryScope);
             }
         }
+
         private void LogOptionsSnapshot(PluginConfiguration options, string action)
         {
             var optionsFilePath = this.OptionsStore.OptionsFilePath;
@@ -520,6 +535,16 @@ namespace MediaInfoKeeper
                     lookup[folder.ItemId] = folder.ItemId;
                 }
 
+                if (!string.IsNullOrWhiteSpace(folder.Id))
+                {
+                    lookup[folder.Id] = folder.ItemId;
+                }
+
+                if (!string.IsNullOrWhiteSpace(folder.Guid))
+                {
+                    lookup[folder.Guid] = folder.ItemId;
+                }
+
                 if (!string.IsNullOrWhiteSpace(folder.Name))
                 {
                     lookup[folder.Name.Trim()] = folder.ItemId;
@@ -528,6 +553,7 @@ namespace MediaInfoKeeper
 
             var tokens = raw.Split(new[] { ',', ';', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
             var normalized = new List<string>();
+            var invalid = new List<string>();
             foreach (var token in tokens)
             {
                 var value = token.Trim();
@@ -538,12 +564,20 @@ namespace MediaInfoKeeper
 
                 if (lookup.TryGetValue(value, out var mapped))
                 {
-                    normalized.Add(mapped);
+                    if (!normalized.Contains(mapped, StringComparer.OrdinalIgnoreCase))
+                    {
+                        normalized.Add(mapped);
+                    }
                 }
                 else
                 {
-                    normalized.Add(value);
+                    invalid.Add(value);
                 }
+            }
+
+            if (invalid.Count > 0)
+            {
+                this.logger.Warn("已移除失效媒体库范围配置: {0}", string.Join(",", invalid));
             }
 
             return string.Join(",", normalized);
