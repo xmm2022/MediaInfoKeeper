@@ -22,6 +22,7 @@
   <a href="LICENSE">
     <img src="https://img.shields.io/github/license/honue/MediaInfoKeeper" />
   </a>
+  <br>
   <a href="https://github.com/honue/MediaInfoKeeper/wiki">
     <img src="https://img.shields.io/badge/Wiki-功能说明-blue?logo=github&amp;logoColor=white" />
   </a>
