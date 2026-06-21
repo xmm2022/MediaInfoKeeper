@@ -293,8 +293,7 @@ namespace MediaInfoKeeper.Services
                     JsonOptions);
             if (diskCachedResult != null)
             {
-                LogHit(detail, diskCachedResult);
-                return diskCachedResult;
+                return NotFound("cache hit");
             }
 
             var requestUrl = apiUrl + "?" + string.Join("&", query.RequestParts);

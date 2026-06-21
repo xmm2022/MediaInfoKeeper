@@ -67,6 +67,7 @@ namespace MediaInfoKeeper.Services
             public string DoubanSubjectType { get; set; }
 
             public string CacheKey { get; set; }
+
         }
 
         private sealed class DoubanSubjectCacheEntry
@@ -141,11 +142,6 @@ namespace MediaInfoKeeper.Services
                 return null;
             }
 
-            if (string.IsNullOrWhiteSpace(context.DoubanSubjectId))
-            {
-                return null;
-            }
-
             return new DoubanMetadataPayload
             {
                 DoubanSubjectId = context.DoubanSubjectId
@@ -178,7 +174,7 @@ namespace MediaInfoKeeper.Services
                     JsonOptions);
             if (diskCachedCelebrities != null)
             {
-                return diskCachedCelebrities;
+                return null;
             }
 
             var body = DoubanApiClient.GetJson(DoubanApiClient.BuildCelebritiesUrl(context.DoubanSubjectType, context.DoubanSubjectId));
@@ -355,7 +351,7 @@ namespace MediaInfoKeeper.Services
                     JsonOptions);
             if (!string.IsNullOrWhiteSpace(diskCachedSubject?.SubjectId))
             {
-                return diskCachedSubject.SubjectId;
+                return null;
             }
 
             var body = DoubanApiClient.PostImdbLookup(imdbId);
@@ -404,7 +400,7 @@ namespace MediaInfoKeeper.Services
                     JsonOptions);
             if (!string.IsNullOrWhiteSpace(cachedSearch?.SubjectId))
             {
-                return cachedSearch.SubjectId;
+                return null;
             }
 
             var body = DoubanApiClient.GetJson(DoubanApiClient.BuildSearchUrl(query));

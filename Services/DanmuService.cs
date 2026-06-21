@@ -279,11 +279,8 @@ namespace MediaInfoKeeper.Services
             }
 
             await File.WriteAllBytesAsync(targetPath, fetchResult.XmlBytes, cancellationToken).ConfigureAwait(false);
-            if (!fetchResult.FromCache)
-            {
-                this.logger.Info($"Danmu 下载成功: {FormatItemForLog(item)}");
-            }
 
+            this.logger.Info($"Danmu 下载成功: {FormatItemForLog(item)}");
             return Succeeded();
         }
 
@@ -293,13 +290,35 @@ namespace MediaInfoKeeper.Services
             return result.XmlBytes;
         }
 
-        private sealed class DanmuFetchResult
+        public async Task<DanmuFetchResult> FetchDanmuXmlDetailedForApiAsync(BaseItem item, CancellationToken cancellationToken)
+        {
+            return await FetchDanmuXmlDetailedAsync(item, cancellationToken).ConfigureAwait(false);
+        }
+
+        public sealed class DanmuFetchResult
         {
             public byte[] XmlBytes { get; set; }
 
             public string Reason { get; set; }
+        }
 
-            public bool FromCache { get; set; }
+        public bool TryGetCachedDanmuXmlBytes(BaseItem item, out byte[] xmlBytes)
+        {
+            xmlBytes = null;
+            if (item == null || !TryBuildSearchRequest(item, out var animeTitle, out var episodeNumber))
+            {
+                return false;
+            }
+
+            var cacheKey = BuildSearchCacheKey(animeTitle, episodeNumber);
+            var cachedXmlBytes = PluginDiskCache.GetBytes(FetchCacheScope, cacheKey, FetchCacheDuration, ".xml");
+            if (cachedXmlBytes == null || cachedXmlBytes.Length == 0)
+            {
+                return false;
+            }
+
+            xmlBytes = cachedXmlBytes;
+            return true;
         }
 
         private async Task<DanmuFetchResult> FetchDanmuXmlDetailedAsync(BaseItem item, CancellationToken cancellationToken)
@@ -320,17 +339,12 @@ namespace MediaInfoKeeper.Services
             }
 
             var baseUrl = Plugin.Instance?.Options?.MetaData?.DanmuApiBaseUrl?.Trim();
-            var cacheKey = BuildSearchCacheKey(animeTitle, episodeNumber);
-            var cachedXmlBytes = PluginDiskCache.GetBytes(FetchCacheScope, cacheKey, FetchCacheDuration, ".xml");
-            if (cachedXmlBytes != null && cachedXmlBytes.Length > 0)
+            if (TryGetCachedDanmuXmlBytes(item, out var cachedXmlBytes))
             {
-                return new DanmuFetchResult
-                {
-                    XmlBytes = cachedXmlBytes,
-                    FromCache = true
-                };
+                return new DanmuFetchResult { XmlBytes = cachedXmlBytes };
             }
 
+            var cacheKey = BuildSearchCacheKey(animeTitle, episodeNumber);
             var episodeId = await SearchEpisodeIdAsync(baseUrl, animeTitle, episodeNumber, cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(episodeId))
             {

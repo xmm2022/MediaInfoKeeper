@@ -287,6 +287,11 @@ namespace MediaInfoKeeper.Services
                 return Task.CompletedTask;
             }
 
+            if (Plugin.DanmuService.TryGetCachedDanmuXmlBytes(item, out _))
+            {
+                return Task.CompletedTask;
+            }
+
             if (!prefetchingDanmuItemIds.TryAdd(item.InternalId, 0))
             {
                 logger.Debug($"{source}: 跳过，拉取中 {item.FileName ?? item.Name}");

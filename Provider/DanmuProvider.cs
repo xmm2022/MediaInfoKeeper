@@ -83,6 +83,11 @@ namespace MediaInfoKeeper.Provider
                 return ItemUpdateType.None;
             }
 
+            if (Plugin.DanmuService.TryGetCachedDanmuXmlBytes(item, out _))
+            {
+                return ItemUpdateType.None;
+            }
+
             try
             {
                 var result = await Plugin.DanmuService

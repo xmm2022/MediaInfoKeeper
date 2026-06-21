@@ -121,11 +121,17 @@ namespace MediaInfoKeeper.Web
             {
                 try
                 {
+                    if (Plugin.DanmuService.TryGetCachedDanmuXmlBytes(item, out var cachedXmlBytes))
+                    {
+                        return _resultFactory.GetResult(Request, (ReadOnlyMemory<byte>)cachedXmlBytes, "application/xml");
+                    }
+
                     using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                    var xmlBytes = Plugin.DanmuService
-                        .FetchDanmuXmlBytesAsync(item, cancellationTokenSource.Token)
+                    var fetchResult = Plugin.DanmuService
+                        .FetchDanmuXmlDetailedForApiAsync(item, cancellationTokenSource.Token)
                         .GetAwaiter()
                         .GetResult();
+                    var xmlBytes = fetchResult?.XmlBytes;
                     if (xmlBytes != null && xmlBytes.Length > 0)
                     {
                         try
@@ -137,6 +143,7 @@ namespace MediaInfoKeeper.Web
                             }
 
                             File.WriteAllBytes(danmuXmlPath, xmlBytes);
+
                             logger?.Debug($"弹幕API: 最新弹幕拉取成功并写入本地 {logContext} path={danmuXmlPath}");
                         }
                         catch (Exception ex)
@@ -148,7 +155,12 @@ namespace MediaInfoKeeper.Web
                         return _resultFactory.GetResult(Request, (ReadOnlyMemory<byte>)xmlBytes, "application/xml");
                     }
 
-                    logger?.Debug($"弹幕API: 网络拉取结果为空 {logContext}");
+                    if (string.IsNullOrWhiteSpace(fetchResult?.Reason))
+                    {
+                        return CreateEmptyDanmuResult();
+                    }
+
+                    logger?.Debug($"弹幕API: 网络拉取结果为空 {logContext} reason={fetchResult.Reason}");
                 }
                 catch (Exception ex)
                 {
