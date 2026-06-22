@@ -338,7 +338,7 @@ namespace MediaInfoKeeper.Services
                 }
 
                 var startAttemptSuffix = maxAttempts > 1 && attempt > 1 ? $" 第 {attempt}/{maxAttempts} 次" : string.Empty;
-                this.logger.Info($"{source} 提取媒体信息开始{startAttemptSuffix}: {displayName}");
+                this.logger.Info($"{source} 提取开始{startAttemptSuffix}: {displayName}");
 
                 var collectionFolders = Plugin.LibraryManager.GetCollectionFolders(item).Cast<BaseItem>().ToArray();
                 var libraryOptions = Plugin.LibraryManager.GetLibraryOptions(item);
@@ -352,7 +352,7 @@ namespace MediaInfoKeeper.Services
                     return MediaInfoExtractionAttemptResult.RetryableFailure;
                 }
 
-                this.logger.Info($"{source} 提取媒体信息成功: {displayName}");
+                this.logger.Info($"{source} 提取成功: {displayName}");
                 return MediaInfoExtractionAttemptResult.Succeeded;
             }
         }

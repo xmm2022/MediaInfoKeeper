@@ -656,17 +656,16 @@ namespace MediaInfoKeeper
                                 try
                                 {
                                     // 恢复失败时先触发媒体信息提取，再写入 JSON。
-                                    this.logger.Info($"入库媒体信息: 媒体信息缺失，开始提取 item={itemDisplayName}");
-
                                     var extracted = await MediaInfoRunner
                                         .ExtractMediaInfoAsync(
                                             itemId,
                                             "入库媒体信息",
                                             cancellationToken: CancellationToken.None)
                                         .ConfigureAwait(false);
-                                    this.logger.Info(extracted
-                                        ? $"入库媒体信息: 提取完成 item={itemDisplayName}"
-                                        : $"入库媒体信息: 提取失败 item={itemDisplayName}");
+                                    if (!extracted)
+                                    {
+                                        this.logger.Info($"入库媒体信息: 提取失败 item={itemDisplayName}");
+                                    }
                                 }
                                 catch (Exception extractEx)
                                 {
