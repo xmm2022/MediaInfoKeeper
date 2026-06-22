@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using HarmonyLib;
+using MediaInfoKeeper.Services;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Logging;
@@ -129,9 +130,10 @@ namespace MediaInfoKeeper.Patch
         }
 
         [HarmonyPrefix]
-        private static bool HasChangedPrefix(ref bool __result)
+        private static bool HasChangedPrefix(BaseMetadataResult __0, ref bool __result)
         {
-            if (!isEnabled || !FfProcessGuard.HasExplicitAllowance())
+            var itemPath = __0?.BaseItem?.Path ?? __0?.BaseItem?.FileName;
+            if (!isEnabled || !FfProcessGuard.HasExplicitAllowance() || !LibraryService.IsFileShortcut(itemPath))
             {
                 return true;
             }
