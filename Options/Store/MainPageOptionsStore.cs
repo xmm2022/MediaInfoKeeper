@@ -37,8 +37,8 @@ namespace MediaInfoKeeper.Options.Store
 
             return new StatusItem(
                 "刷新队列",
-                $"元数据刷新：{metadataStats.Total} / {metadataStats.MaxConcurrent}\n" +
-                $"媒体信息提取：{mediaInfoStats.Total} / {mediaInfoStats.MaxConcurrent}",
+                $"提取媒体信息：{mediaInfoStats.Total} / {mediaInfoStats.MaxConcurrent}\n" +
+                $"刷新媒体元数据：{metadataStats.Total} / {metadataStats.MaxConcurrent}",
                 metadataStats.Running != 0 || mediaInfoStats.Running != 0
                     ? ItemStatus.InProgress
                     : ItemStatus.Succeeded);
