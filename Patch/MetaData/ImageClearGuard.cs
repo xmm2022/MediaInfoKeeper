@@ -1,8 +1,8 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
-using MediaInfoKeeper.Services;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
@@ -10,7 +10,7 @@ using MediaBrowser.Model.Logging;
 namespace MediaInfoKeeper.Patch
 {
     /// <summary>
-    /// 保护快捷方式条目在图片刷新失败时不被清空现有主图。
+    /// 保护条目在图片刷新未产出替代图时不误删外部刮削的本地图片。
     /// </summary>
     public static class ImageClearGuard
     {
@@ -68,24 +68,167 @@ namespace MediaInfoKeeper.Patch
             isEnabled = enableGuard;
         }
 
-        private static void ClearImagesPrefix(BaseItem item, ref ImageType[] imageTypesToClear, int numBackdropToKeep)
+        private static void ClearImagesPrefix(BaseItem item, ref ImageType[] imageTypesToClear, ref int numBackdropToKeep)
         {
             if (!isEnabled ||
                 item == null ||
                 item.InternalId == 0 ||
-                !item.HasImage(ImageType.Primary) ||
-                imageTypesToClear == null ||
-                !imageTypesToClear.Contains(ImageType.Primary) ||
-                !LibraryService.IsFileShortcut(item.Path ?? item.FileName))
+                imageTypesToClear == null)
             {
                 return;
             }
 
-            // SaveImage succeeds before ClearImages, so removing Primary here only protects
-            // the current image when no replacement was actually written.
-            imageTypesToClear = imageTypesToClear
-                .Where(imageType => imageType != ImageType.Primary)
+            var protectedImages = GetProtectedImages(item);
+            if (protectedImages.Length == 0)
+            {
+                return;
+            }
+
+            var clearTypes = imageTypesToClear;
+            var protectedClearTypes = protectedImages
+                .Where(image => image.Type != ImageType.Backdrop && clearTypes.Contains(image.Type))
+                .Select(image => image.Type)
+                .Distinct()
                 .ToArray();
+
+            if (protectedClearTypes.Length > 0)
+            {
+                // SaveImage succeeds before ClearImages, so removing these types here only protects
+                // existing local scraper images when no replacement was actually written.
+                imageTypesToClear = imageTypesToClear
+                    .Where(imageType => !protectedClearTypes.Contains(imageType))
+                    .ToArray();
+            }
+
+            if (numBackdropToKeep <= 0)
+            {
+                var protectedBackdropKeepCount = GetBackdropKeepCount(item, protectedImages);
+                if (protectedBackdropKeepCount > numBackdropToKeep)
+                {
+                    numBackdropToKeep = protectedBackdropKeepCount;
+                }
+            }
+        }
+
+        private static int GetBackdropKeepCount(BaseItem item, ProtectedImage[] protectedImages)
+        {
+            if (!protectedImages.Any(image => image.Type == ImageType.Backdrop))
+            {
+                return 0;
+            }
+
+            var backdropIndex = 0;
+            var keepCount = 0;
+            foreach (var image in item.ImageInfos ?? Array.Empty<ItemImageInfo>())
+            {
+                if (image.Type != ImageType.Backdrop)
+                {
+                    continue;
+                }
+
+                if (protectedImages.Any(protectedImage =>
+                        protectedImage.Type == ImageType.Backdrop &&
+                        PathsEqual(protectedImage.Path, image.Path)))
+                {
+                    keepCount = backdropIndex + 1;
+                }
+
+                backdropIndex++;
+            }
+
+            return keepCount;
+        }
+
+        private static ProtectedImage[] GetProtectedImages(BaseItem item)
+        {
+            var itemPath = item.Path ?? item.FileName;
+            if (string.IsNullOrWhiteSpace(itemPath))
+            {
+                return Array.Empty<ProtectedImage>();
+            }
+
+            var folder = Path.GetDirectoryName(itemPath);
+            var basename = Path.GetFileNameWithoutExtension(itemPath);
+            if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(basename))
+            {
+                return Array.Empty<ProtectedImage>();
+            }
+
+            var prefixedImages = new[]
+                {
+                    (Type: ImageType.Primary, Suffix: "-poster"),
+                    (Type: ImageType.Backdrop, Suffix: "-fanart"),
+                    (Type: ImageType.Thumb, Suffix: "-thumb")
+                }
+                .Select(candidate => new ProtectedImage(
+                    candidate.Type,
+                    FindSiblingImagePath(folder, basename + candidate.Suffix)))
+                .Where(image => !string.IsNullOrWhiteSpace(image.Path))
+                .ToArray();
+
+            if (prefixedImages.Length == 0)
+            {
+                return Array.Empty<ProtectedImage>();
+            }
+
+            return (item.ImageInfos ?? Array.Empty<ItemImageInfo>())
+                .Where(image => image != null && image.IsLocalFile)
+                .Select(image => new ProtectedImage(image.Type, image.Path))
+                .Where(image => prefixedImages.Any(prefixedImage =>
+                    prefixedImage.Type == image.Type &&
+                    PathsEqual(prefixedImage.Path, image.Path)))
+                .GroupBy(image => image.Type + "\n" + NormalizePath(image.Path))
+                .Select(group => group.First())
+                .ToArray();
+        }
+
+        private static string FindSiblingImagePath(string folder, string filenameWithoutExtension)
+        {
+            foreach (var extension in BaseItem.SupportedImageExtensions)
+            {
+                var path = Path.Combine(folder, filenameWithoutExtension + extension);
+                if (File.Exists(path))
+                {
+                    return path;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool PathsEqual(string left, string right)
+        {
+            return string.Equals(NormalizePath(left), NormalizePath(right), StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string NormalizePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return Path.GetFullPath(path);
+            }
+            catch
+            {
+                return path;
+            }
+        }
+
+        private readonly struct ProtectedImage
+        {
+            public ProtectedImage(ImageType type, string path)
+            {
+                Type = type;
+                Path = path;
+            }
+
+            public ImageType Type { get; }
+
+            public string Path { get; }
         }
 
         private static MethodInfo ResolveClearImages(Assembly embyProvidersAssembly)
