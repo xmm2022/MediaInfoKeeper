@@ -70,6 +70,12 @@
     <PackageReference Include="TinyPinyin" Version="1.1.0" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="SQLitePCLRawEx.core">
+      <HintPath>Resources\dll\SQLitePCLRawEx.core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
     <Folder Include="Patch\DataBase\" />
   </ItemGroup>
 

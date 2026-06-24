@@ -27,8 +27,6 @@ namespace MediaInfoKeeper.Patch
     /// </summary>
     public static class ChineseSearch
     {
-        private static Type raw;
-        private static MethodInfo sqlite3_enable_load_extension;
         private static FieldInfo sqlite3_db;
         private static PropertyInfo sqliteParentConnection;
         private static MethodInfo createConnection;
@@ -101,22 +99,6 @@ namespace MediaInfoKeeper.Patch
                 {
                     var resolverVersion = Plugin.Instance?.AppHost?.ApplicationVersion ?? new Version(0, 0, 0, 0);
                     var sqlitePclEx = Assembly.Load("SQLitePCLRawEx.core");
-                    raw = sqlitePclEx.GetType("SQLitePCLEx.raw");
-                    var sqlite3Type = sqlitePclEx.GetType("SQLitePCLEx.sqlite3");
-                    sqlite3_enable_load_extension = PatchMethodResolver.Resolve(
-                        raw,
-                        sqlitePclEx.GetName().Version,
-                        new MethodSignatureProfile
-                        {
-                            Name = "sqlitepclex-raw-enable-load-extension-exact",
-                            MethodName = "sqlite3_enable_load_extension",
-                            BindingFlags = BindingFlags.Static | BindingFlags.Public,
-                            ParameterTypes = sqlite3Type == null ? null : new[] { sqlite3Type, typeof(int) },
-                            ReturnType = typeof(int),
-                            IsStatic = true
-                        },
-                        logger,
-                        "ChineseSearch.sqlite3_enable_load_extension");
 
                     sqlite3_db = typeof(SQLiteDatabaseConnection)
                         .GetField("db", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -200,8 +182,7 @@ namespace MediaInfoKeeper.Patch
                         "ChineseSearch.CacheIdsFromTextParams");
 
                     if (createConnection == null || dbFilePath == null || getJoinCommandText == null ||
-                        cacheIdsFromTextParams == null || sqlite3_db == null ||
-                        sqlite3_enable_load_extension == null)
+                        cacheIdsFromTextParams == null || sqlite3_db == null || sqlitePclEx == null)
                     {
                         PatchLog.InitFailed(logger, nameof(ChineseSearch), "缺少反射目标");
                         return;
@@ -770,7 +751,7 @@ namespace MediaInfoKeeper.Patch
             {
                 if (RuntimeInformation.OSArchitecture == Architecture.X64)
                 {
-                    return "338bb0915d6f4625b54f041bdeb6791b6e590c4e";
+                    return "4933deef42afa6d62f0b3ccc45f1c8b44ca67272";
                 }
 
                 if (RuntimeInformation.OSArchitecture == Architecture.Arm64)
@@ -787,12 +768,12 @@ namespace MediaInfoKeeper.Patch
                 {
                     if (RuntimeInformation.OSArchitecture == Architecture.X64)
                     {
-                        return "cb54822a0e3fbc535d9e385bfc83ecabdf81217f";
+                        return "26bfe510546437056af26f6b837bed4eab846d71";
                     }
 
                     if (RuntimeInformation.OSArchitecture == Architecture.Arm64)
                     {
-                        return "b7216c7240bf748822a3556e1ca20aef133e1252";
+                        return "5dc43fa20bead198d8912b18b4538496a314c860";
                     }
 
                     return null;
@@ -800,12 +781,12 @@ namespace MediaInfoKeeper.Patch
 
                 if (RuntimeInformation.OSArchitecture == Architecture.X64)
                 {
-                    return "a6188af48c0fef201cb24dbebc65c4cf5b4ddf9b";
+                    return "e0ebb9fb04109d03949b76c94b220cab269edf41";
                 }
 
                 if (RuntimeInformation.OSArchitecture == Architecture.Arm64)
                 {
-                    return "16d3b24f2a5d2f89c6ae56d412613f8379d1ad8a";
+                    return "a3af09dc02efa779a0108ebbc60ce70b20be4707";
                 }
 
                 return null;
@@ -895,9 +876,11 @@ namespace MediaInfoKeeper.Patch
 
             try
             {
-                var db = sqlite3_db.GetValue(connection);
-                sqlite3_enable_load_extension.Invoke(raw, new[] { db, 1 });
-                connection.Execute("SELECT load_extension('" + tokenizerPath + "')");
+                var db = (SQLitePCLEx.sqlite3)sqlite3_db.GetValue(connection);
+                if (!LoadTokenizerExtensionNative(db, logErrors))
+                {
+                    return false;
+                }
 
                 lock (TokenizerStateLock)
                 {
@@ -920,6 +903,40 @@ namespace MediaInfoKeeper.Patch
                 {
                     logger?.Warn("增强搜索 - 加载分词器失败。");
                     logger?.Warn(e.ToString());
+                }
+            }
+
+            return false;
+        }
+
+        private static bool LoadTokenizerExtensionNative(SQLitePCLEx.sqlite3 db, bool logErrors)
+        {
+            var enableResult = SQLitePCLEx.raw.sqlite3_enable_load_extension(db, 1);
+            if (enableResult != 0)
+            {
+                if (logErrors)
+                {
+                    logger?.Warn("增强搜索 - 启用 SQLite 扩展加载失败，错误码: " + enableResult);
+                }
+
+                return false;
+            }
+
+            var file = SQLitePCLEx.utf8z.FromString(tokenizerPath.AsSpan());
+            var proc = SQLitePCLEx.utf8z.FromString("sqlite3_simple_init".AsSpan());
+            var loadResult = SQLitePCLEx.raw.sqlite3_load_extension(db, file, proc, out var error);
+            if (loadResult == 0)
+            {
+                return true;
+            }
+
+            if (logErrors)
+            {
+                var errorText = error.utf8_to_string();
+                logger?.Error("增强搜索 - 加载 simple 分词器失败，错误码: " + loadResult);
+                if (!string.IsNullOrWhiteSpace(errorText))
+                {
+                    logger?.Error("增强搜索 - SQLite 扩展错误: " + errorText);
                 }
             }
 
