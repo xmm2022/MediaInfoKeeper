@@ -45,20 +45,15 @@ namespace MediaInfoKeeper.Patch
                     File.Delete(probePath);
 
                     var switchesType = FindMonoModSwitchesType();
-                    var setSwitchValue = switchesType?.GetMethod(
-                        "SetSwitchValue",
-                        BindingFlags.Static | BindingFlags.Public,
-                        null,
-                        new[] { typeof(string), typeof(object) },
-                        null);
-                    if (setSwitchValue == null)
+                    SetHarmonyDumpDirectory(switchesType, tempDirectory, logger);
+                    var actualTempDirectory = GetMonoModSwitchValue(switchesType, "HelperDropPath");
+                    if (string.IsNullOrWhiteSpace(actualTempDirectory))
                     {
-                        logger?.Warn((Plugin.Instance?.Name ?? Plugin.PluginName) + " Harmony 临时目录设置失败：未找到 MonoMod.Switches.SetSwitchValue。");
+                        logger?.Warn((Plugin.Instance?.Name ?? Plugin.PluginName) + " Harmony 临时目录设置失败：MonoMod HelperDropPath 未设置。");
                         return;
                     }
 
-                    setSwitchValue.Invoke(null, new object[] { "DMDDumpTo", tempDirectory });
-                    logger?.Info((Plugin.Instance?.Name ?? Plugin.PluginName) + " Harmony 临时目录设置为: " + tempDirectory);
+                    logger?.Info((Plugin.Instance?.Name ?? Plugin.PluginName) + " Harmony 临时目录设置为: " + actualTempDirectory);
                 }
                 catch (Exception e)
                 {
@@ -79,6 +74,42 @@ namespace MediaInfoKeeper.Patch
             return AppDomain.CurrentDomain.GetAssemblies()
                 .Select(assembly => assembly.GetType("MonoMod.Switches", throwOnError: false))
                 .FirstOrDefault(type => type != null);
+        }
+
+        private static void SetHarmonyDumpDirectory(Type switchesType, string tempDirectory, ILogger logger)
+        {
+            var setSwitchValue = switchesType?.GetMethod(
+                "SetSwitchValue",
+                BindingFlags.Static | BindingFlags.Public,
+                null,
+                new[] { typeof(string), typeof(object) },
+                null);
+            if (setSwitchValue == null)
+            {
+                logger?.Warn((Plugin.Instance?.Name ?? Plugin.PluginName) + " Harmony 临时目录设置失败：未找到 MonoMod.Switches.SetSwitchValue。");
+                return;
+            }
+
+            setSwitchValue.Invoke(null, new object[] { "DMDDumpTo", tempDirectory });
+            setSwitchValue.Invoke(null, new object[] { "HelperDropPath", tempDirectory });
+        }
+
+        private static string GetMonoModSwitchValue(Type switchesType, string switchName)
+        {
+            var tryGetSwitchValue = switchesType?.GetMethod(
+                "TryGetSwitchValue",
+                BindingFlags.Static | BindingFlags.Public,
+                null,
+                new[] { typeof(string), typeof(object).MakeByRefType() },
+                null);
+            if (tryGetSwitchValue == null)
+            {
+                return null;
+            }
+
+            var args = new object[] { switchName, null };
+            var found = tryGetSwitchValue.Invoke(null, args) as bool?;
+            return found == true ? args[1]?.ToString() : null;
         }
     }
 }
