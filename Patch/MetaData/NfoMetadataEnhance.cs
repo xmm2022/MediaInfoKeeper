@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -9,6 +10,7 @@ using System.Xml;
 using HarmonyLib;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Model.Logging;
@@ -44,8 +46,6 @@ namespace MediaInfoKeeper.Patch
         private static bool isHookInstalled;
         private static bool waitingForAssembly;
         private static Assembly nfoMetadataAssembly;
-        private static MethodBase parserConstructor;
-        private static MethodInfo getPersonFromXmlNode;
 
         public static bool IsReady => harmony != null && (waitingForAssembly || isHookInstalled);
 
@@ -134,56 +134,44 @@ namespace MediaInfoKeeper.Patch
                     return;
                 }
 
-                var parserVideoType = parserGeneric.MakeGenericType(typeof(Video));
-                parserConstructor = PatchMethodResolver.ResolveConstructor(
-                    parserVideoType,
-                    version,
-                    new ConstructorSignatureProfile
-                    {
-                        Name = "base-nfo-parser-video-ctor-exact",
-                        BindingFlags = BindingFlags.Instance | BindingFlags.Public,
-                        ParameterTypes = new[]
-                        {
-                            typeof(ILogger),
-                            typeof(IConfigurationManager),
-                            typeof(IProviderManager),
-                            typeof(IFileSystem)
-                        }
-                    },
-                    logger,
-                    "NfoMetadataEnhance.BaseNfoParser.ctor");
-
-                getPersonFromXmlNode = PatchMethodResolver.Resolve(
-                    parserVideoType,
-                    version,
-                    new MethodSignatureProfile
-                    {
-                        Name = "base-nfo-parser-getpersonfromxmlnode",
-                        MethodName = "GetPersonFromXmlNode",
-                        BindingFlags = BindingFlags.Instance | BindingFlags.NonPublic,
-                        IsStatic = false,
-                        ParameterTypes = new[] { typeof(XmlReader) },
-                        ReturnType = typeof(Task<PersonInfo>)
-                    },
-                    logger,
-                    "NfoMetadataEnhance.BaseNfoParser.GetPersonFromXmlNode");
-
-                if (parserConstructor == null || getPersonFromXmlNode == null)
+                var patchedMethods = new List<MethodInfo>();
+                foreach (var itemType in GetNfoItemTypes())
                 {
-                    PatchLog.InitFailed(logger, nameof(NfoMetadataEnhance), "目标方法缺失");
-                    return;
+                    var parserType = parserGeneric.MakeGenericType(itemType);
+                    var getPersonFromXmlNode = PatchMethodResolver.Resolve(
+                        parserType,
+                        version,
+                        new MethodSignatureProfile
+                        {
+                            Name = $"base-nfo-parser-{itemType.Name}-getpersonfromxmlnode",
+                            MethodName = "GetPersonFromXmlNode",
+                            BindingFlags = BindingFlags.Instance | BindingFlags.NonPublic,
+                            IsStatic = false,
+                            ParameterTypes = new[] { typeof(XmlReader) },
+                            ReturnType = typeof(Task<PersonInfo>)
+                        },
+                        logger,
+                        $"NfoMetadataEnhance.BaseNfoParser<{itemType.FullName}>.GetPersonFromXmlNode");
+
+                    if (getPersonFromXmlNode == null)
+                    {
+                        continue;
+                    }
+
+                    harmony.Patch(
+                        getPersonFromXmlNode,
+                        prefix: new HarmonyMethod(typeof(NfoMetadataEnhance), nameof(GetPersonFromXmlNodePrefix)),
+                        postfix: new HarmonyMethod(typeof(NfoMetadataEnhance), nameof(GetPersonFromXmlNodePostfix)));
+
+                    patchedMethods.Add(getPersonFromXmlNode);
+                    PatchLog.Patched(logger, nameof(NfoMetadataEnhance), getPersonFromXmlNode);
                 }
 
-                PatchLog.Patched(logger, nameof(NfoMetadataEnhance), parserConstructor.ToString(), version?.ToString());
-                PatchLog.Patched(logger, nameof(NfoMetadataEnhance), getPersonFromXmlNode);
-
-                harmony.Patch(
-                    parserConstructor,
-                    prefix: new HarmonyMethod(typeof(NfoMetadataEnhance), nameof(ParserConstructorPrefix)));
-                harmony.Patch(
-                    getPersonFromXmlNode,
-                    prefix: new HarmonyMethod(typeof(NfoMetadataEnhance), nameof(GetPersonFromXmlNodePrefix)),
-                    postfix: new HarmonyMethod(typeof(NfoMetadataEnhance), nameof(GetPersonFromXmlNodePostfix)));
+                if (patchedMethods.Count == 0)
+                {
+                    PatchLog.InitFailed(logger, nameof(NfoMetadataEnhance), "GetPersonFromXmlNode 目标方法缺失");
+                    return;
+                }
 
                 isHookInstalled = true;
                 waitingForAssembly = false;
@@ -196,21 +184,18 @@ namespace MediaInfoKeeper.Patch
             }
         }
 
-        [HarmonyPrefix]
-        private static bool ParserConstructorPrefix()
+        private static Type[] GetNfoItemTypes()
         {
-            if (harmony == null || getPersonFromXmlNode == null)
+            return new[]
             {
-                return true;
-            }
-
-            harmony.Unpatch(getPersonFromXmlNode, HarmonyPatchType.Prefix, harmony.Id);
-            harmony.Unpatch(getPersonFromXmlNode, HarmonyPatchType.Postfix, harmony.Id);
-            harmony.Patch(
-                getPersonFromXmlNode,
-                prefix: new HarmonyMethod(typeof(NfoMetadataEnhance), nameof(GetPersonFromXmlNodePrefix)),
-                postfix: new HarmonyMethod(typeof(NfoMetadataEnhance), nameof(GetPersonFromXmlNodePostfix)));
-            return true;
+                typeof(Video),
+                typeof(Episode),
+                typeof(Series),
+                typeof(Season),
+                typeof(BoxSet),
+                typeof(Game),
+                typeof(Person)
+            };
         }
 
         [HarmonyPrefix]
