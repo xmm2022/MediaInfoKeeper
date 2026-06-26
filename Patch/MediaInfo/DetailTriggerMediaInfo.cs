@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using HarmonyLib;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
 using MediaInfoKeeper.Services;
 
@@ -170,12 +172,24 @@ namespace MediaInfoKeeper.Patch
                 return;
             }
 
-            if (Plugin.MediaInfoService?.HasMediaInfo(item) == true)
+            var mediaInfoService = Plugin.MediaInfoService;
+            if (mediaInfoService == null)
             {
                 return;
             }
 
-            QueueExtraction(item);
+            foreach (var mediaSource in mediaInfoService.GetStaticMediaSources(item, true))
+            {
+                if (mediaSource?.MediaStreams?.Any(stream =>
+                        stream != null &&
+                        !stream.IsExternal &&
+                        (stream.Type == MediaStreamType.Audio || stream.Type == MediaStreamType.Video)) == true)
+                {
+                    continue;
+                }
+
+                QueueExtraction(GetItemById(mediaSource?.ItemId) ?? item);
+            }
         }
 
         private static BaseItem GetItemById(string itemId)
