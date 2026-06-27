@@ -83,8 +83,19 @@ namespace MediaInfoKeeper.Options
         [Description("开启后会跟踪到 302 最终地址，客户端重定向到最终直链；关闭后直接返回 .strm 中的原始 URL。")]
         [VisibleCondition(nameof(EnableStrmDirectRedirect), SimpleCondition.IsTrue)]
         public bool StrmDirectRedirectFollow302 { get; set; } = true;
+
+        [DisplayName("直连 URL 白名单")]
+        [Description("按 .strm 原始 URL 前缀匹配，留空表示不限制。支持逗号、分号或换行分隔。")]
+        [VisibleCondition(nameof(EnableStrmDirectRedirect), SimpleCondition.IsTrue)]
+        public string StrmDirectRedirectUrlAllowlist { get; set; } = string.Empty;
+
+        [DisplayName("直连 URL 黑名单")]
+        [Description("按 .strm 原始 URL 前缀匹配，命中后不启用 .strm 302 直连。黑名单优先于白名单。支持逗号、分号或换行分隔。")]
+        [VisibleCondition(nameof(EnableStrmDirectRedirect), SimpleCondition.IsTrue)]
+        public string StrmDirectRedirectUrlBlocklist { get; set; } = string.Empty;
         
         [DisplayName("视频直连客户端黑名单")]
+        [Description("按客户端名称关键字匹配，命中的客户端不启用 .strm 302 直连。支持逗号、分号或换行分隔。")]
         [VisibleCondition(nameof(EnableStrmDirectRedirect), SimpleCondition.IsTrue)]
         public string StrmVideoDirectRedirectClientBlacklist { get; set; } = string.Empty;
         
@@ -305,6 +316,8 @@ namespace MediaInfoKeeper.Options
             AddGroup("Emby Strm", "",
                 nameof(EnableStrmDirectRedirect),
                 nameof(StrmDirectRedirectFollow302),
+                nameof(StrmDirectRedirectUrlAllowlist),
+                nameof(StrmDirectRedirectUrlBlocklist),
                 nameof(StrmVideoDirectRedirectClientBlacklist),
                 nameof(StrmAudioDirectRedirectClientBlacklist));
 

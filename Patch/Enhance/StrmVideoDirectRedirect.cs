@@ -34,6 +34,8 @@ namespace MediaInfoKeeper.Patch
         private static Type videoStreamRequestType;
         private static bool followRedirect302 = true;
         private static string[] clientBlacklist = Array.Empty<string>();
+        private static string[] urlAllowlist = Array.Empty<string>();
+        private static string[] urlBlocklist = Array.Empty<string>();
 
         public static bool IsReady => harmony != null
             && processRequestMethod != null
@@ -45,17 +47,19 @@ namespace MediaInfoKeeper.Patch
             ILogger pluginLogger,
             bool enabled,
             bool follow302,
+            string urlAllowlistText,
+            string urlBlocklistText,
             string clientBlacklistText)
         {
             if (harmony != null)
             {
-                Configure(enabled, follow302, clientBlacklistText);
+                Configure(enabled, follow302, urlAllowlistText, urlBlocklistText, clientBlacklistText);
                 return;
             }
 
             logger = pluginLogger;
             isEnabled = enabled;
-            ApplySettings(follow302, clientBlacklistText);
+            ApplySettings(follow302, urlAllowlistText, urlBlocklistText, clientBlacklistText);
 
             try
             {
@@ -156,10 +160,15 @@ namespace MediaInfoKeeper.Patch
             }
         }
 
-        public static void Configure(bool enabled, bool follow302, string clientBlacklistText)
+        public static void Configure(
+            bool enabled,
+            bool follow302,
+            string urlAllowlistText,
+            string urlBlocklistText,
+            string clientBlacklistText)
         {
             isEnabled = enabled;
-            ApplySettings(follow302, clientBlacklistText);
+            ApplySettings(follow302, urlAllowlistText, urlBlocklistText, clientBlacklistText);
             if (harmony == null)
             {
                 return;
@@ -255,6 +264,16 @@ namespace MediaInfoKeeper.Patch
                 }
 
                 var originalUrl = mediaSource.Path;
+                if (!StrmDirectRedirectUrlFilter.IsAllowed(originalUrl, urlAllowlist, urlBlocklist))
+                {
+                    logger?.Info(
+                        "StrmVideoDirectRedirect: URL 未命中直连规则，回退 Emby 中转。itemId={0}, url={1}",
+                        itemId,
+                        originalUrl);
+                    DisposeState(state);
+                    return true;
+                }
+
                 var redirectUrl = ResolveRedirectUrl(originalUrl, requestContext?.UserAgent);
                 var decodedRedirectUrl = redirectUrl;
                 if (!string.IsNullOrWhiteSpace(decodedRedirectUrl))
@@ -415,9 +434,15 @@ namespace MediaInfoKeeper.Patch
         }
 
         /// <summary>应用运行时配置，并在必要时清理缓存与预加载去重状态。</summary>
-        private static void ApplySettings(bool follow302, string clientBlacklistText)
+        private static void ApplySettings(
+            bool follow302,
+            string urlAllowlistText,
+            string urlBlocklistText,
+            string clientBlacklistText)
         {
             followRedirect302 = follow302;
+            urlAllowlist = StrmDirectRedirectUrlFilter.ParsePatterns(urlAllowlistText);
+            urlBlocklist = StrmDirectRedirectUrlFilter.ParsePatterns(urlBlocklistText);
             clientBlacklist = ParseClientBlacklist(clientBlacklistText);
         }
 

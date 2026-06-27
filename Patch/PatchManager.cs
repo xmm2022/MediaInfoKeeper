@@ -452,10 +452,14 @@ namespace MediaInfoKeeper.Patch
                     logger,
                     options.Enhance.EnableStrmDirectRedirect,
                     options.Enhance.StrmDirectRedirectFollow302,
+                    options.Enhance.StrmDirectRedirectUrlAllowlist,
+                    options.Enhance.StrmDirectRedirectUrlBlocklist,
                     options.Enhance.StrmVideoDirectRedirectClientBlacklist),
                 Configure = options => StrmVideoDirectRedirect.Configure(
                     IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
                     options.Enhance.StrmDirectRedirectFollow302,
+                    options.Enhance.StrmDirectRedirectUrlAllowlist,
+                    options.Enhance.StrmDirectRedirectUrlBlocklist,
                     options.Enhance.StrmVideoDirectRedirectClientBlacklist),
                 IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
                 IsReady = () => StrmVideoDirectRedirect.IsReady
@@ -468,10 +472,14 @@ namespace MediaInfoKeeper.Patch
                     logger,
                     options.Enhance.EnableStrmDirectRedirect,
                     options.Enhance.StrmDirectRedirectFollow302,
+                    options.Enhance.StrmDirectRedirectUrlAllowlist,
+                    options.Enhance.StrmDirectRedirectUrlBlocklist,
                     options.Enhance.StrmAudioDirectRedirectClientBlacklist),
                 Configure = options => StrmAudioDirectRedirect.Configure(
                     IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
                     options.Enhance.StrmDirectRedirectFollow302,
+                    options.Enhance.StrmDirectRedirectUrlAllowlist,
+                    options.Enhance.StrmDirectRedirectUrlBlocklist,
                     options.Enhance.StrmAudioDirectRedirectClientBlacklist),
                 IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
                 IsReady = () => StrmAudioDirectRedirect.IsReady
