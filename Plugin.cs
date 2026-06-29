@@ -56,7 +56,7 @@ namespace MediaInfoKeeper
         public static Plugin Instance { get; private set; }
         public static MediaInfoService MediaInfoService { get; private set; }
         public static MetaDataService MetaDataService { get; private set; }
-        
+
         public static ChaptersStore ChaptersStore { get; private set; }
         public static MediaSourceInfoStore MediaSourceInfoStore { get; private set; }
         public static EmbeddedInfoStore EmbeddedInfoStore { get; private set; }
@@ -87,6 +87,7 @@ namespace MediaInfoKeeper
         private readonly IApplicationHost applicationHost;
         private readonly ITaskManager taskManager;
         private readonly ReleaseInfoService releaseInfoService;
+        private readonly SemaphoreSlim itemAddedSemaphore;
 
         internal static IProviderManager ProviderManager { get; private set; }
         internal static IFileSystem FileSystem { get; private set; }
@@ -176,6 +177,8 @@ namespace MediaInfoKeeper
             var initialOptions = this.Options;
             PersistOptionsOnStartup(initialOptions);
             ConfigureRunners(initialOptions);
+            var itemAddedMaxConcurrent = Math.Max(1, initialOptions?.MediaInfo?.MaxConcurrentCount ?? 1);
+            this.itemAddedSemaphore = new SemaphoreSlim(itemAddedMaxConcurrent, itemAddedMaxConcurrent);
             PatchManager.Initialize(this.logger, initialOptions, activityManager);
 
             this.PlugginEnabled = initialOptions.MainPage?.PlugginEnabled ?? true;
@@ -362,7 +365,7 @@ namespace MediaInfoKeeper
             ConfigureRunners(options);
 
             LogOptionsSnapshot(options, "已更新");
-            
+
             PatchManager.Configure(options);
 
             if (options.IntroSkip.EnableIntroMarker || options.IntroSkip.EnableCreditsMarker)
@@ -596,81 +599,79 @@ namespace MediaInfoKeeper
         }
 
         /// <summary>处理新入库条目，按配置执行持久化或恢复。</summary>
-        private async void OnItemAdded(object sender, ItemChangeEventArgs e)
+        private void OnItemAdded(object sender, ItemChangeEventArgs e)
         {
-            try
+            var item = e?.Item;
+            if (item == null)
             {
-                if (!this.PlugginEnabled)
-                {
-                    // 未启用持久化，直接跳过。
-                    return;
-                }
+                return;
+            }
 
-                if (!(e.Item is Video) && !(e.Item is Audio))
+            _ = Task.Run(async () =>
+            {
+                var semaphoreHeld = false;
+                try
                 {
-                    // 仅处理音视频条目。
-                    return;
-                }
-                this.logger.Info($"新入库事件 {e.Item.FileName ?? e.Item.Path}");
+                    await this.itemAddedSemaphore.WaitAsync().ConfigureAwait(false);
+                    semaphoreHeld = true;
 
-                if (e.Item is not Audio)
-                {
-                    // 视频，异步刷新一次元数据，让 Emby 先刮削，音乐提取内嵌封面需要媒体流，要等媒体信息先提取。
-                    _ = MetaDataRunner.RefreshMetaDataAsync(e.Item.InternalId, priority:RefreshPriority.Highest, allowFfProcess:true);
-                }
-                
-                if (!LibraryService.IsItemInCatchupLibraryScope(e.Item))
-                {
-                    // 条目不在选定媒体库范围内。
-                    this.logger.Info("跳过处理: 不在选定媒体库范围，不提取媒体信息");
-                    return;
-                }
-
-                // 判断当前条目是否已有 MediaInfo。
-                var hasMediaInfo = MediaInfoService.HasMediaInfo(e.Item);
-                if (!hasMediaInfo)
-                {
-                    // 优先尝试从 JSON 恢复，减少首次提取耗时。
-                    this.logger.Debug("尝试从 JSON 恢复 MediaInfo");
-                    var restoreResult = MediaSourceInfoStore.ApplyToItem(e.Item);
-                    var shouldRefreshAfterRestore = restoreResult == MediaInfoDocument.MediaInfoRestoreResult.Failed;
-                    if (e.Item is Video)
+                    if (!this.PlugginEnabled)
                     {
-                        ChaptersStore.ApplyToItem(e.Item);
-                    }
-                    else if (e.Item is Audio)
-                    {
-                        EmbeddedInfoStore.ApplyToItem(e.Item);
+                        // 未启用持久化，直接跳过。
+                        return;
                     }
 
-                    // 如果不存在Json文件，则使用ffprobe 提取一次
-                    if (shouldRefreshAfterRestore)
+                    if (!(item is Video) && !(item is Audio))
                     {
-                        if (!this.Options.MediaInfo.ExtractMediaInfoOnItemAdded)
+                        // 仅处理音视频条目。
+                        return;
+                    }
+                    this.logger.Info($"新入库事件 {item.FileName ?? item.Path}");
+
+                    if (item is not Audio)
+                    {
+                        // 视频，异步刷新一次元数据，让 Emby 先刮削，音乐提取内嵌封面需要媒体流，要等媒体信息先提取。
+                        _ = MetaDataRunner.RefreshMetaDataAsync(item.InternalId, priority:RefreshPriority.Highest, allowFfProcess:true);
+                    }
+
+                    if (!LibraryService.IsItemInCatchupLibraryScope(item))
+                    {
+                        // 条目不在选定媒体库范围内。
+                        this.logger.Info("跳过处理: 不在选定媒体库范围，不提取媒体信息");
+                        return;
+                    }
+
+                    // 判断当前条目是否已有 MediaInfo。
+                    var hasMediaInfo = MediaInfoService.HasMediaInfo(item);
+                    if (!hasMediaInfo)
+                    {
+                        // 优先尝试从 JSON 恢复，减少首次提取耗时。
+                        this.logger.Debug("尝试从 JSON 恢复 MediaInfo");
+                        var restoreResult = MediaSourceInfoStore.ApplyToItem(item);
+                        var shouldRefreshAfterRestore = restoreResult == MediaInfoDocument.MediaInfoRestoreResult.Failed;
+
+                        // 如果不存在Json文件，则使用ffprobe 提取一次
+                        if (shouldRefreshAfterRestore)
                         {
-                            this.logger.Info($"已关闭入库提取媒体信息，跳过提取 item={e.Item.FileName ?? e.Item.Path}");
-                        }
-                        else
-                        {
-                            var itemId = e.Item.InternalId;
-                            var itemDisplayName = e.Item.FileName ?? e.Item.Path;
-                            _ = Task.Run(async () =>
+                            if (!this.Options.MediaInfo.ExtractMediaInfoOnItemAdded)
                             {
+                                this.logger.Info($"已关闭入库提取媒体信息，跳过提取 item={item.FileName ?? item.Path}");
+                            }
+                            else
+                            {
+                                var itemId = item.InternalId;
+                                var itemDisplayName = item.FileName ?? item.Path;
                                 try
                                 {
                                     // 恢复失败时先触发媒体信息提取，再写入 JSON。
-                                    var extracted = await MediaInfoRunner
-                                        .ExtractMediaInfoAsync(
-                                            itemId,
-                                            "入库媒体信息",
-                                            cancellationToken: CancellationToken.None)
+                                    var extracted = await MediaInfoRunner.ExtractMediaInfoAsync(itemId, "入库媒体信息", cancellationToken: CancellationToken.None)
                                         .ConfigureAwait(false);
                                     if (!extracted)
                                     {
                                         this.logger.Info($"入库媒体信息: 提取失败 item={itemDisplayName}");
                                     }
                                     // 提取成功且 item 是音乐
-                                    else if (e.Item is Audio)
+                                    else if (item is Audio)
                                     {
                                         _ = MetaDataRunner.RefreshMetaDataAsync(itemId, priority: RefreshPriority.Highest, allowFfProcess:true);
                                     }
@@ -681,114 +682,84 @@ namespace MediaInfoKeeper
                                     this.logger.Error(extractEx.Message);
                                     this.logger.Debug(extractEx.StackTrace);
                                 }
-                            });
+                            }
+                        }
+                        // 使用Json媒体信息数据，恢复成功后触发当前条目刷新。
+                        else if (restoreResult == MediaInfoDocument.MediaInfoRestoreResult.Restored)
+                        {
+                            var itemPath = item.Path ?? item.ContainingFolderPath ?? item.InternalId.ToString();
+                            this.logger.Info($"入库媒体信息: JSON 恢复成功 item={itemPath}");
+
+                            if (item is Video)
+                            {
+                                ChaptersStore.ApplyToItem(item);
+                            }
+                            else if (item is Audio)
+                            {
+                                EmbeddedInfoStore.ApplyToItem(item);
+                            }
+
+                            // 恢复成功且 item 是音乐
+                            if (item is not Audio)
+                            {
+                                _ = MetaDataRunner.RefreshMetaDataAsync(item.InternalId, priority: RefreshPriority.Highest, allowFfProcess:true);
+                            }
                         }
                     }
-                    // 使用Json媒体信息数据，恢复成功后扫描所在物理路径，确保库状态刷新。
-                    else if (restoreResult == MediaInfoDocument.MediaInfoRestoreResult.Restored)
+                    // 入库加入扫描片头队列
+                    if (this.Options.IntroSkip?.ScanIntroOnItemAdded == true && item is Episode episode)
                     {
-                        var itemPath = e.Item.Path ?? e.Item.ContainingFolderPath ?? e.Item.InternalId.ToString();
-                        var parentPath = e.Item.ContainingFolderPath;
-                        this.logger.Info($"入库媒体信息: JSON 恢复成功 item={itemPath}");
-                        
-                        // 恢复成功且 item 是音乐
-                        if (e.Item is not Audio)
-                        {
-                            _ = MetaDataRunner.RefreshMetaDataAsync(e.Item.InternalId, priority: RefreshPriority.Highest, allowFfProcess:true);
-                        }
+                        IntroScanService.QueueEpisodeScan(episode, "OnItemAdded");
+                    }
 
-                        if (string.IsNullOrEmpty(parentPath))
+                    // 收藏入库通知分支
+                    if (item is Episode newEpisode && newEpisode.ExtraType == null)
+                    {
+                        var series = LibraryService.GetSeries(newEpisode.SeriesId);
+                        if (series == null)
                         {
-                            this.logger.Info($"未找到条目所在物理路径，跳过扫描 item: {itemPath}");
-                        }
-                        else if (!this.fileSystem.DirectoryExists(parentPath))
-                        {
-                            this.logger.Info($"物理路径不存在，跳过扫描: {parentPath}");
+                            this.logger.Info($"收藏入库通知跳过: 未找到所属剧集，episodeId={newEpisode.InternalId}");
                         }
                         else
                         {
-                            var parentFolder = this.libraryManager.FindByPath(parentPath, true) as Folder;
-                            if (parentFolder == null)
+                            var users = LibraryService.GetFavoriteUsersBySeriesId(series.InternalId);
+                            if (users.Count != 0)
                             {
-                                this.logger.Info($"未找到物理路径对应的文件夹项，跳过刷新: {parentPath}");
+                                // 有人收藏，开始执行扫描收藏媒体信息和片头，避免重复，判断未开启所有入库扫描
+                                var canScanIntro = this.Options.IntroSkip?.ScanIntroOnFavorite == true && this.Options.IntroSkip?.ScanIntroOnItemAdded == false;
+                                if (canScanIntro)
+                                {
+                                    IntroScanService.QueueEpisodeScan(newEpisode, "收藏入库");
+                                }
+
+                                this.logger.Info($"收藏入库事件: 剧集={series.Name} {newEpisode.Name}, 收藏用户={string.Join(", ", users)}");
+                                var sentCount = NotificationApi.LibraryNewSendNotification(series, newEpisode, users);
+                                if (sentCount > 0)
+                                {
+                                    this.logger.Info($"已发送入库通知: 剧集={series.Name} {newEpisode.Name}, 通知用户数={sentCount}");
+                                }
                             }
                             else
                             {
-                                // 仅触发目录校验/发现，不做元数据覆盖与远端抓取。
-                                var discoverOnlyOptions = new MetadataRefreshOptions(new DirectoryService(this.logger, this.fileSystem))
-                                {
-                                    EnableRemoteContentProbe = false,
-                                    MetadataRefreshMode = MetadataRefreshMode.ValidationOnly,
-                                    ReplaceAllMetadata = false,
-                                    ImageRefreshMode = MetadataRefreshMode.ValidationOnly,
-                                    ReplaceAllImages = false,
-                                    EnableThumbnailImageExtraction = false,
-                                    EnableSubtitleDownloading = false
-                                };
-
-                                this.logger.Info($"刷新父级条目: {parentPath}");
-                                try
-                                {
-                                    await MetaDataRunner
-                                        .RefreshMetaDataAsync(parentFolder.InternalId, discoverOnlyOptions, CancellationToken.None)
-                                        .ConfigureAwait(false);
-                                }
-                                catch (Exception refreshEx)
-                                {
-                                    this.logger.Error($"刷新父级条目失败: {parentPath}");
-                                    this.logger.Error(refreshEx.Message);
-                                    this.logger.Debug(refreshEx.StackTrace);
-                                }
+                                this.logger.Debug($"收藏入库通知跳过: 剧集={series.Name}，无收藏用户");
                             }
                         }
                     }
                 }
-                // 入库加入扫描片头队列
-                if (this.Options.IntroSkip?.ScanIntroOnItemAdded == true && e.Item is Episode episode)
+                catch (Exception ex)
                 {
-                    IntroScanService.QueueEpisodeScan(episode, "OnItemAdded");
+                    // 记录异常，避免影响库事件流程。
+                    this.logger.Error(ex.Message);
+                    this.logger.Debug(ex.StackTrace);
                 }
-
-                // 收藏入库通知分支
-                if (e.Item is Episode newEpisode && newEpisode.ExtraType == null)
+                finally
                 {
-                    var series = LibraryService.GetSeries(newEpisode.SeriesId);
-                    if (series == null)
+                    if (semaphoreHeld)
                     {
-                        this.logger.Info($"收藏入库通知跳过: 未找到所属剧集，episodeId={newEpisode.InternalId}");
-                    }
-                    else
-                    {
-                        var users = LibraryService.GetFavoriteUsersBySeriesId(series.InternalId);
-                        if (users.Count != 0)
-                        {
-                            this.logger.Info($"收藏入库事件: 剧集={series.Name} {newEpisode.Name}, 收藏用户={string.Join(", ", users)}");
-                            var sentCount = NotificationApi.LibraryNewSendNotification(series, newEpisode, users);
-                            if (sentCount > 0)
-                            {
-                                this.logger.Info($"已发送入库通知: 剧集={series.Name} {newEpisode.Name}, 通知用户数={sentCount}");
-                            }
-                            // 开始执行扫描收藏媒体信息和片头,避免重复，判断未开启所有入库扫描
-                            var canScanIntro = this.Options.IntroSkip?.ScanIntroOnFavorite == true && this.Options.IntroSkip?.ScanIntroOnItemAdded == false;
-                            if (canScanIntro)
-                            {
-                                IntroScanService.QueueEpisodeScan(newEpisode, "收藏入库");
-                            }
-                        }
-                        else
-                        {
-                            this.logger.Debug($"收藏入库通知跳过: 剧集={series.Name}，无收藏用户");
-                        }
+                        this.itemAddedSemaphore.Release();
                     }
                 }
-
-            }
-            catch (Exception ex)
-            {
-                // 记录异常，避免影响库事件流程。
-                this.logger.Error(ex.Message);
-                this.logger.Debug(ex.StackTrace);
-            }
+            });
         }
 
         /// <summary> 收藏喜爱事件处 </summary>
