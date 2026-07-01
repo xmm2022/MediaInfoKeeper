@@ -13,9 +13,11 @@ namespace MediaInfoKeeper.Services
     public sealed class StrmFileWatcher : IDisposable
     {
         private readonly ILibraryMonitor libraryMonitor;
+        private readonly ILibraryManager libraryManager;
         private readonly LibraryService libraryService;
         private readonly ILogger logger;
         private readonly object syncRoot = new object();
+        private readonly TimeSpan directoryReportDedupeWindow = TimeSpan.FromSeconds(2);
         private readonly TimeSpan modifiedEventDedupeWindow = TimeSpan.FromMilliseconds(100);
 
         private readonly Dictionary<string, FileSystemWatcher> watchers =
@@ -30,10 +32,12 @@ namespace MediaInfoKeeper.Services
 
         public StrmFileWatcher(
             ILibraryMonitor libraryMonitor,
+            ILibraryManager libraryManager,
             LibraryService libraryService,
             ILogger logger)
         {
             this.libraryMonitor = libraryMonitor;
+            this.libraryManager = libraryManager;
             this.libraryService = libraryService;
             this.logger = logger;
         }
@@ -120,20 +124,31 @@ namespace MediaInfoKeeper.Services
         /// </summary>
         private void OnCreated(string path)
         {
-            if (!IsWatchedShortcut(path))
+            if (!IsWatchedMediaFile(path))
             {
                 return;
             }
 
-            RecordCreatedEvent(path);
+            var directoryPath = Path.GetDirectoryName(path);
+            if (string.IsNullOrWhiteSpace(directoryPath))
+            {
+                return;
+            }
+
+            var shouldReportDirectory = RecordCreatedEvent(directoryPath, path);
             this.logger?.Info($"新增媒体文件，{Path.GetFileName(path) ?? path}");
+            if (!shouldReportDirectory)
+            {
+                return;
+            }
+
             try
             {
-                this.libraryMonitor?.ReportFileSystemChanged(path);
+                this.libraryMonitor?.ReportFileSystemChanged(directoryPath);
             }
             catch (Exception ex)
             {
-                this.logger?.Error("StrmFileWatcher 通知 Emby 入库扫描失败");
+                this.logger?.Error($"StrmFileWatcher 通知 Emby 入库扫描失败: {directoryPath}");
                 this.logger?.Error(ex.Message);
             }
         }
@@ -164,16 +179,29 @@ namespace MediaInfoKeeper.Services
                    LibraryService.IsFileShortcut(path);
         }
 
-        private void RecordCreatedEvent(string path)
+        private bool IsWatchedMediaFile(string path)
+        {
+            return this.enabled &&
+                   !this.disposed &&
+                   !string.IsNullOrWhiteSpace(path) &&
+                   (this.libraryManager.IsVideoFile(path.AsSpan()) ||
+                    this.libraryManager.IsAudioFile(path.AsSpan()));
+        }
+
+        private bool RecordCreatedEvent(string directoryPath, string path)
         {
             var now = DateTime.UtcNow;
 
             lock (this.syncRoot)
             {
+                var shouldReportDirectory = !this.createdEvents.TryGetValue(directoryPath, out var createdAt) ||
+                                            now - createdAt >= this.directoryReportDedupeWindow;
+                this.createdEvents[directoryPath] = now;
                 this.createdEvents[path] = now;
                 this.lastModifiedEvents[path] = now;
                 PruneEventCache(this.createdEvents, now);
                 PruneEventCache(this.lastModifiedEvents, now);
+                return shouldReportDirectory;
             }
         }
 
