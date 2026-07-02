@@ -7,6 +7,7 @@ using Emby.Web.GenericEdit.Elements;
 using Emby.Web.GenericEdit.Editors;
 using MediaBrowser.Model.Attributes;
 using MediaBrowser.Model.GenericEdit;
+using MediaInfoKeeper.Common;
 
 namespace MediaInfoKeeper.Options
 {
@@ -39,9 +40,9 @@ namespace MediaInfoKeeper.Options
         [SelectItemsSource(nameof(UpdateChannelList))]
         public string UpdateChannel { get; set; } = UpdateChannelOption.Stable.ToString();
 
-        public LabelItem ProjectUrl { get; set; } = new LabelItem("https://github.com/honue/MediaInfoKeeper")
+        public LabelItem ProjectUrl { get; set; } = new LabelItem($"https://github.com/{GitHubUpdateSource.DefaultRepository}")
         {
-            HyperLink = "https://github.com/honue/MediaInfoKeeper",
+            HyperLink = $"https://github.com/{GitHubUpdateSource.DefaultRepository}",
             Icon = IconNames.open_in_new
         };
 

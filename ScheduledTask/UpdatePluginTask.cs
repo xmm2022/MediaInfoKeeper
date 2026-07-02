@@ -8,6 +8,7 @@ using MediaBrowser.Model.Activity;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Serialization;
 using MediaBrowser.Model.Tasks;
+using MediaInfoKeeper.Common;
 using MediaInfoKeeper.Services;
 using System;
 using System.Collections.Generic;
@@ -35,7 +36,6 @@ namespace MediaInfoKeeper.ScheduledTask
         private readonly ISessionManager sessionManager;
         private readonly ITaskManager taskManager;
         private static string PluginAssemblyFilename => Assembly.GetExecutingAssembly().GetName().Name + ".dll";
-        private static string RepoVersionUrl => "https://raw.githubusercontent.com/honue/MediaInfoKeeper/master/Version.json";
 
         public string Key => "UpdatePluginTask";
 
@@ -117,7 +117,7 @@ namespace MediaInfoKeeper.ScheduledTask
                 var latestReleaseTag = string.IsNullOrWhiteSpace(apiResult?.tag_name)
                     ? "0.0.0.0"
                     : apiResult.tag_name.Trim();
-                var compatibility = await FetchCompatibilityManifest(cancellationToken, updateChannel, apiResult.prerelease).ConfigureAwait(false);
+                var compatibility = await FetchCompatibilityManifest(cancellationToken, updatePluginOptions?.GitHubRepository, updateChannel, apiResult.prerelease).ConfigureAwait(false);
                 var (minVersion, maxVersion) = GetEmbyVersionRange(compatibility);
                 logger.Info(
                     "版本信息：最新插件={0}，当前插件={1}，当前Emby={2}，兼容Emby版本区间=[{3},{4}]",
@@ -328,15 +328,17 @@ namespace MediaInfoKeeper.ScheduledTask
 
         private async Task<PluginCompatibilityInfo> FetchCompatibilityManifest(
             CancellationToken cancellationToken,
+            string githubRepository,
             string updateChannel,
             bool isPrerelease)
         {
             try
             {
                 var githubToken = Plugin.Instance.Options.GetEffectiveUpdatePluginOptions()?.GitHubToken;
+                var versionUrl = GitHubUpdateSource.BuildVersionManifestUrl(githubRepository);
                 var manifestRequestOptions = new HttpRequestOptions
                 {
-                    Url = RepoVersionUrl,
+                    Url = versionUrl,
                     CancellationToken = cancellationToken,
                     AcceptHeader = "application/json",
                     UserAgent = "MediaInfoKeeper",
@@ -372,7 +374,7 @@ namespace MediaInfoKeeper.ScheduledTask
             }
             catch (Exception ex)
             {
-                logger.Debug("加载 Version.json 失败：url={0}, error={1}", RepoVersionUrl, ex.Message);
+                logger.Debug("加载 Version.json 失败：url={0}, error={1}", GitHubUpdateSource.BuildVersionManifestUrl(githubRepository), ex.Message);
             }
 
             logger.Info("未获取到 Version.json 兼容信息，默认允许更新。");

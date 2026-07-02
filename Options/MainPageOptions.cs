@@ -8,6 +8,7 @@ using Emby.Web.GenericEdit.Elements.List;
 using Emby.Web.GenericEdit.Editors;
 using MediaBrowser.Model.Attributes;
 using MediaBrowser.Model.GenericEdit;
+using MediaInfoKeeper.Common;
 
 namespace MediaInfoKeeper.Options
 {
@@ -261,6 +262,10 @@ namespace MediaInfoKeeper.Options
             [Description("仅用于插件 Dll 下载，例如 https://ghfast.top 已配置网络代理时通常不需要再设置这里，避免代理链路叠加。")]
             public string DownloadUrlPrefix { get; set; } = string.Empty;
 
+            [DisplayName("GitHub 仓库")]
+            [Description("插件更新源，格式 owner/repo，也支持完整 GitHub 仓库地址。")]
+            public string GitHubRepository { get; set; } = GitHubUpdateSource.DefaultRepository;
+
             [Browsable(false)]
             public List<EditorSelectOption> UpdateChannelList { get; set; } = new List<EditorSelectOption>();
 
@@ -276,6 +281,8 @@ namespace MediaInfoKeeper.Options
 
             public void Initialize()
             {
+                GitHubRepository = GitHubUpdateSource.NormalizeRepository(GitHubRepository);
+
                 if (string.IsNullOrWhiteSpace(UpdateChannel))
                 {
                     UpdateChannel = UpdateChannelOption.Stable.ToString();
@@ -345,6 +352,7 @@ namespace MediaInfoKeeper.Options
                 AddGroup("更新插件", "",
                     nameof(GitHubToken),
                     nameof(DownloadUrlPrefix),
+                    nameof(GitHubRepository),
                     nameof(UpdateChannel),
                     nameof(RestartEmbyAfterUpdate));
 
@@ -398,9 +406,9 @@ namespace MediaInfoKeeper.Options
         [Browsable(false)]
         public bool ShowRefreshQueueStatus { get; set; } = true;
 
-        public LabelItem UpdatePluginProjectUrl { get; set; } = new LabelItem("https://github.com/honue/MediaInfoKeeper")
+        public LabelItem UpdatePluginProjectUrl { get; set; } = new LabelItem($"https://github.com/{GitHubUpdateSource.DefaultRepository}")
         {
-            HyperLink = "https://github.com/honue/MediaInfoKeeper",
+            HyperLink = $"https://github.com/{GitHubUpdateSource.DefaultRepository}",
             Icon = IconNames.open_in_new
         };
 

@@ -17,7 +17,6 @@ namespace MediaInfoKeeper.Services
     {
         private const int ReleasePageSize = 5;
         private const int MaxReleasePages = 1;
-        private static string RepoReleaseUrlTemplate => $"https://api.github.com/repos/honue/MediaInfoKeeper/releases?per_page={ReleasePageSize}&page={{0}}";
         private static readonly TimeSpan PeriodicRefreshInterval = TimeSpan.FromHours(24);
         private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
         {
@@ -301,6 +300,11 @@ namespace MediaInfoKeeper.Services
             return this.getOptions()?.GetEffectiveUpdatePluginOptions()?.GitHubToken;
         }
 
+        private string GetGitHubRepository()
+        {
+            return this.getOptions()?.GetEffectiveUpdatePluginOptions()?.GitHubRepository;
+        }
+
         private void EnsureHistoryForCurrentChannel()
         {
             var currentChannel = this.GetSelectedUpdateChannel();
@@ -369,7 +373,7 @@ namespace MediaInfoKeeper.Services
         {
             var releaseRequestOptions = new HttpRequestOptions
             {
-                Url = string.Format(RepoReleaseUrlTemplate, page),
+                Url = GitHubUpdateSource.BuildReleaseApiUrl(this.GetGitHubRepository(), ReleasePageSize, page),
                 CancellationToken = cancellationToken,
                 AcceptHeader = "application/json",
                 UserAgent = "MediaInfoKeeper",
