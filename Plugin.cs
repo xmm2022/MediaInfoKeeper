@@ -64,7 +64,6 @@ namespace MediaInfoKeeper
         public static NotificationApi NotificationApi { get; private set; }
         public static IntroSkipChapterApi IntroSkipChapterApi { get; private set; }
         public static IntroSkipPlaySessionMonitor IntroSkipPlaySessionMonitor { get; private set; }
-        public static IntroScanService IntroScanService { get; private set; }
         public static PrefetchService PrefetchService { get; private set; }
         public static StrmFileWatcher StrmFileWatcher { get; private set; }
         public static ExternalFiles ExternalFiles { get; private set; }
@@ -194,12 +193,12 @@ namespace MediaInfoKeeper
 
             NotificationApi = new NotificationApi(notificationManager, userManager, sessionManager);
             IntroSkipChapterApi = new IntroSkipChapterApi(libraryManager, itemRepository, this.logger);
-            IntroScanService = new IntroScanService(logManager, libraryManager, fileSystem);
+            IntroScanRunner.Initialize(logManager, libraryManager, fileSystem);
             IntroSkipPlaySessionMonitor = new IntroSkipPlaySessionMonitor(
                 libraryManager, userManager, sessionManager, this.logger);
             PrefetchService = new PrefetchService(
                 libraryManager, sessionManager, this.logger);
-            StrmFileWatcher = new StrmFileWatcher(libraryMonitor, LibraryService, this.logger);
+            StrmFileWatcher = new StrmFileWatcher(libraryMonitor, libraryManager, LibraryService, this.logger);
             PluginWebResourceLoader.Initialize(serverConfigurationManager);
             PrefetchService.Initialize();
             this.releaseInfoService.Start();
@@ -362,7 +361,6 @@ namespace MediaInfoKeeper
             var netWorkOptions = options.GetNetWorkOptions();
 
             this.PlugginEnabled = options.MainPage.PlugginEnabled;
-            ConfigureRunners(options);
 
             LogOptionsSnapshot(options, "已更新");
 
@@ -388,9 +386,11 @@ namespace MediaInfoKeeper
             var safeOptions = options ?? new PluginConfiguration();
             safeOptions.MediaInfo ??= new MediaInfoOptions();
             safeOptions.MetaData ??= new MetaDataOptions();
+            safeOptions.IntroSkip ??= new IntroSkipOptions();
 
             MediaInfoRunner.Configure(safeOptions.MediaInfo.MaxConcurrentCount);
             MetaDataRunner.Configure(safeOptions.MetaData.MaxConcurrentCount);
+            IntroScanRunner.Configure(safeOptions.IntroSkip.IntroDetectionMaxConcurrentCount);
         }
 
         internal void UpdatePinyinSortNameLastProcessedAt(DateTimeOffset processedAt)
@@ -606,6 +606,9 @@ namespace MediaInfoKeeper
             {
                 return;
             }
+            
+            var itemId = item.InternalId;
+            var itemDisplayName = item.FileName ?? item.Path;
 
             _ = Task.Run(async () =>
             {
@@ -628,16 +631,11 @@ namespace MediaInfoKeeper
                     }
                     this.logger.Info($"新入库事件 {item.FileName ?? item.Path}");
 
-                    if (item is not Audio)
-                    {
-                        // 视频，异步刷新一次元数据，让 Emby 先刮削，音乐提取内嵌封面需要媒体流，要等媒体信息先提取。
-                        _ = MetaDataRunner.RefreshMetaDataAsync(item.InternalId, priority:RefreshPriority.Highest, allowFfProcess:true);
-                    }
-
                     if (!LibraryService.IsItemInCatchupLibraryScope(item))
                     {
                         // 条目不在选定媒体库范围内。
                         this.logger.Info("跳过处理: 不在选定媒体库范围，不提取媒体信息");
+                        _ = MetaDataRunner.RefreshMetaDataAsync(itemId, priority: RefreshPriority.Highest, allowFfProcess:true);
                         return;
                     }
 
@@ -659,8 +657,6 @@ namespace MediaInfoKeeper
                             }
                             else
                             {
-                                var itemId = item.InternalId;
-                                var itemDisplayName = item.FileName ?? item.Path;
                                 try
                                 {
                                     // 恢复失败时先触发媒体信息提取，再写入 JSON。
@@ -669,11 +665,6 @@ namespace MediaInfoKeeper
                                     if (!extracted)
                                     {
                                         this.logger.Info($"入库媒体信息: 提取失败 item={itemDisplayName}");
-                                    }
-                                    // 提取成功且 item 是音乐
-                                    else if (item is Audio)
-                                    {
-                                        _ = MetaDataRunner.RefreshMetaDataAsync(itemId, priority: RefreshPriority.Highest, allowFfProcess:true);
                                     }
                                 }
                                 catch (Exception extractEx)
@@ -694,25 +685,14 @@ namespace MediaInfoKeeper
                             {
                                 ChaptersStore.ApplyToItem(item);
                             }
-                            else if (item is Audio)
+                            if (item is Audio)
                             {
                                 EmbeddedInfoStore.ApplyToItem(item);
                             }
-
-                            // 恢复成功且 item 是音乐
-                            if (item is not Audio)
-                            {
-                                _ = MetaDataRunner.RefreshMetaDataAsync(item.InternalId, priority: RefreshPriority.Highest, allowFfProcess:true);
-                            }
                         }
                     }
-                    // 入库加入扫描片头队列
-                    if (this.Options.IntroSkip?.ScanIntroOnItemAdded == true && item is Episode episode)
-                    {
-                        IntroScanService.QueueEpisodeScan(episode, "OnItemAdded");
-                    }
-
-                    // 收藏入库通知分支
+                    
+                    // 收藏
                     if (item is Episode newEpisode && newEpisode.ExtraType == null)
                     {
                         var series = LibraryService.GetSeries(newEpisode.SeriesId);
@@ -729,9 +709,9 @@ namespace MediaInfoKeeper
                                 var canScanIntro = this.Options.IntroSkip?.ScanIntroOnFavorite == true && this.Options.IntroSkip?.ScanIntroOnItemAdded == false;
                                 if (canScanIntro)
                                 {
-                                    IntroScanService.QueueEpisodeScan(newEpisode, "收藏入库");
+                                    _ = IntroScanRunner.ScanEpisodeAsync(newEpisode, "收藏入库", priority: RefreshPriority.High);
                                 }
-
+                                // 有人收藏，通知收藏入库
                                 this.logger.Info($"收藏入库事件: 剧集={series.Name} {newEpisode.Name}, 收藏用户={string.Join(", ", users)}");
                                 var sentCount = NotificationApi.LibraryNewSendNotification(series, newEpisode, users);
                                 if (sentCount > 0)
@@ -745,6 +725,19 @@ namespace MediaInfoKeeper
                             }
                         }
                     }
+                    
+                    // 入库加入扫描片头队列
+                    if (this.Options.IntroSkip?.ScanIntroOnItemAdded == true && item is Episode episode)
+                    {
+                        _ = IntroScanRunner.ScanEpisodeAsync(episode, "入库片头扫描", priority: RefreshPriority.High);
+                    }
+                    
+                    // 所有需要媒体信息的任务启动完成后，后台等待媒体信息队列清空，再刷新元数据。
+                    _ = Task.Run(async () =>
+                    {
+                        await MediaInfoRunner.WaitForItemFinishAsync(itemId, CancellationToken.None).ConfigureAwait(false);
+                        _ = MetaDataRunner.RefreshMetaDataAsync(itemId, priority: RefreshPriority.Highest, allowFfProcess:true);
+                    });
                 }
                 catch (Exception ex)
                 {
@@ -807,7 +800,7 @@ namespace MediaInfoKeeper
                     {
                         foreach (var seriesEpisode in episodes)
                         {
-                            IntroScanService.QueueEpisodeScan(seriesEpisode, "OnFavorite");
+                            _ = IntroScanRunner.ScanEpisodeAsync(seriesEpisode, "OnFavorite", priority: RefreshPriority.High);
                         }
                     }
                     else

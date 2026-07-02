@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using MediaInfoKeeper.Services;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Logging;
@@ -37,7 +38,7 @@ namespace MediaInfoKeeper.ScheduledTask
         {
             this.logger.Info("最近入库片头扫描计划任务开始");
             var episodes = FetchRecentEpisodes();
-            await Plugin.IntroScanService
+            await IntroScanRunner
                 .ScanEpisodesAsync(episodes, cancellationToken, progress)
                 .ConfigureAwait(false);
             this.logger.Info("最近入库片头扫描计划任务完成");

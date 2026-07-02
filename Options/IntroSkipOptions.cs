@@ -93,7 +93,7 @@ namespace MediaInfoKeeper.Options
         public int MinOpeningPlotDurationSeconds { get; set; } = 60;
 
         [DisplayName("片头探测最大并发数")]
-        [Description("限制 AudioFingerprint 片头探测同时运行的条目数，默认 1。调大可加快扫描，但会增加 CPU 和磁盘压力。")]
+        [Description("限制 AudioFingerprint 片头探测同时运行的条目数，修改后重启生效，默认 1。调大可加快扫描，但会增加 CPU 和磁盘压力。")]
         [MinValue(1), MaxValue(10)]
         [Required]
         public int IntroDetectionMaxConcurrentCount { get; set; } = 1;

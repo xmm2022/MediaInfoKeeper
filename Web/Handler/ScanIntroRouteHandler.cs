@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using MediaInfoKeeper.Services;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
+using MediaBrowser.Controller.Providers;
 
 namespace MediaInfoKeeper.Web.Handler
 {
@@ -24,7 +26,7 @@ namespace MediaInfoKeeper.Web.Handler
             {
                 response.Message = "no items";
                 Plugin.Instance.Logger.Info(
-                    $"ShortcutMenu ScanIntro result: total={response.Total}, processed={response.Processed}, succeeded={response.Succeeded}, failed={response.Failed}, skipped={response.Skipped}, message={response.Message}");
+                    $"ShortcutMenu ScanIntro result: total={response.Total}, processed={response.Processed}, submitted={response.Succeeded}, skipped={response.Skipped}, message={response.Message}");
                 return response;
             }
 
@@ -35,15 +37,7 @@ namespace MediaInfoKeeper.Web.Handler
             {
                 response.Message = "no supported items";
                 Plugin.Instance.Logger.Info(
-                    $"ShortcutMenu ScanIntro result: total={response.Total}, processed={response.Processed}, succeeded={response.Succeeded}, failed={response.Failed}, skipped={response.Skipped}, message={response.Message}");
-                return response;
-            }
-
-            if (Plugin.IntroScanService == null)
-            {
-                response.Message = "intro scan service unavailable";
-                response.Failed = targetItems.Count;
-                Plugin.Instance.Logger.Error("ShortcutMenu ScanIntro failed: IntroScanService is null.");
+                    $"ShortcutMenu ScanIntro result: total={response.Total}, processed={response.Processed}, submitted={response.Succeeded}, skipped={response.Skipped}, message={response.Message}");
                 return response;
             }
 
@@ -52,19 +46,20 @@ namespace MediaInfoKeeper.Web.Handler
                 response.Processed++;
                 try
                 {
-                    if (Plugin.IntroScanService.QueueEpisodeScan(episode, "ShortcutMenu"))
-                    {
-                        response.Succeeded++;
-                        Plugin.Instance.Logger.Info($"ShortcutMenu 扫描片头已入队: {episode.Path ?? episode.Name}");
-                    }
-                    else
+                    var scanTask = IntroScanRunner.ScanEpisodeAsync(episode, "ShortcutMenu", priority: RefreshPriority.High);
+                    if (scanTask.IsCompletedSuccessfully && !scanTask.Result)
                     {
                         response.Skipped++;
+                        continue;
                     }
+
+                    _ = scanTask;
+                    response.Succeeded++;
+                    Plugin.Instance.Logger.Info($"ShortcutMenu 扫描片头已提交: {episode.Path ?? episode.Name}");
                 }
                 catch (Exception ex)
                 {
-                    response.Failed++;
+                    response.Skipped++;
                     Plugin.Instance.Logger.Error($"快捷菜单扫描片头失败: {episode.Path ?? episode.Name}");
                     Plugin.Instance.Logger.Error(ex.Message);
                     Plugin.Instance.Logger.Debug(ex.StackTrace);
@@ -73,7 +68,7 @@ namespace MediaInfoKeeper.Web.Handler
 
             response.Message = response.Succeeded > 0 ? "scan intro queued" : "no episodes queued";
             Plugin.Instance.Logger.Info(
-                $"ShortcutMenu ScanIntro result: total={response.Total}, processed={response.Processed}, succeeded={response.Succeeded}, failed={response.Failed}, skipped={response.Skipped}, message={response.Message}");
+                $"ShortcutMenu ScanIntro result: total={response.Total}, processed={response.Processed}, submitted={response.Succeeded}, skipped={response.Skipped}, message={response.Message}");
             return response;
         }
     }

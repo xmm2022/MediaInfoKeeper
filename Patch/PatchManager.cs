@@ -149,6 +149,16 @@ namespace MediaInfoKeeper.Patch
 
             registrations.Add(new PatchRegistration
             {
+                Name = "FirstRefreshRemoteBlock",
+                Initialize = options => FirstRefreshRemoteBlock.Initialize(logger, IsPluginEnabled(options)),
+                Configure = options => FirstRefreshRemoteBlock.Configure(IsPluginEnabled(options)),
+                IsEnabled = options => IsPluginEnabled(options),
+                IsReady = () => FirstRefreshRemoteBlock.IsReady,
+                Notes = () => "首次 Default 刷新屏蔽远程提供器"
+            });
+
+            registrations.Add(new PatchRegistration
+            {
                 Name = "RefreshQueueHijack",
                 Initialize = _ => RefreshQueueHijack.Initialize(logger, true),
                 Configure = options => RefreshQueueHijack.SetEnabled(

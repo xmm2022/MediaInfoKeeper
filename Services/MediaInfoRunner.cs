@@ -124,6 +124,27 @@ namespace MediaInfoKeeper.Services
             return await extractionTask.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// 如果指定条目正在提取媒体信息，则等待该提取任务完成；没有正在运行的任务时直接返回。
+        /// </summary>
+        public static async Task<bool> WaitForItemFinishAsync(
+            long internalId,
+            CancellationToken cancellationToken = default)
+        {
+            Task<bool> extractionTask = null;
+            lock (QueueSync)
+            {
+                if (InFlightExtractions.TryGetValue(internalId, out var existing) &&
+                    existing.Disabled != true)
+                {
+                    extractionTask = existing.Completion.Task;
+                }
+            }
+
+            return extractionTask == null ||
+                   await extractionTask.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         private static Task<bool> QueueExtraction(
             long internalId,
             string source,

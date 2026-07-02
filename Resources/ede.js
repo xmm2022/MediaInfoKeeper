@@ -3,7 +3,7 @@
 // @description  Emby弹幕插件 - Emby风格
 // @namespace    https://github.com/l429609201/dd-danmaku
 // @author       misaka10876, chen3861229
-// @version      1.2.2
+// @version      1.2.5
 // @copyright    2024, misaka10876 (https://github.com/l429609201)
 // @license      MIT; https://raw.githubusercontent.com/RyoLee/emby-danmaku/master/LICENSE
 // @icon         https://github.githubassets.com/pinned-octocat.svg
@@ -37,7 +37,7 @@
     // note02: url 禁止使用相对路径,非 web 环境的根路径为文件路径,非 http
     // ------ 程序内部使用,请勿更改 start ------
     const openSourceLicense = {
-        self: { version: '1.2.2', name: 'Emby Danmaku Extension (misaka10876 Fork)', license: 'MIT License', url: 'https://github.com/l429609201/dd-danmaku' },
+        self: { version: '1.2.5', name: 'Emby Danmaku Extension (misaka10876 Fork)', license: 'MIT License', url: 'https://github.com/l429609201/dd-danmaku' },
         chen3861229: { version: '1.45', name: 'Emby Danmaku Extension(Forked from original:1.11)', license: 'MIT License', url: 'https://github.com/chen3861229/dd-danmaku' },
         original: { version: '1.11', name: 'Emby Danmaku Extension', license: 'MIT License', url: 'https://github.com/RyoLee/emby-danmaku' },
         jellyfinFork: { version: '1.52', name: 'Jellyfin Danmaku Extension', license: 'MIT License', url: 'https://github.com/Izumiko/jellyfin-danmaku' },
@@ -50,9 +50,12 @@
         get prefix() {
             // [修改] 支持多源：使用第一个自定义源
             const customList = typeof getCustomApiList === 'function' ? getCustomApiList() : [];
-            const custom = customList.length > 0 ? customList[0] : lsGetItem(lsKeys.customApiPrefix.id);
-            if (custom && custom.length > 0 && !lsGetItem(lsKeys.useOfficialApi.id)) {
-                return custom;
+            // [修复] customList[0] 是对象 {name, url, enabled}，需要取 .url；旧配置是字符串
+            const customItem = customList.length > 0 ? customList[0] : null;
+            const customUrl = customItem ? (typeof customItem === 'string' ? customItem : customItem.url) : lsGetItem(lsKeys.customApiPrefix.id);
+            // [修复] 校验 URL 必须以 http:// 或 https:// 开头，防止不完整 URL 导致 Worker 报错
+            if (customUrl && customUrl.length > 0 && (customUrl.startsWith('http://') || customUrl.startsWith('https://')) && !lsGetItem(lsKeys.useOfficialApi.id)) {
+                return customUrl;
             }
             // 官方API强制走代理
             return corsProxy + 'https://api.dandanplay.net/api/v2';
@@ -67,14 +70,24 @@
         get prefix() {
             // [修改] 支持多源：使用第一个自定义源
             const customList = typeof getCustomApiList === 'function' ? getCustomApiList() : [];
-            const custom = customList.length > 0 ? customList[0] : lsGetItem(lsKeys.customApiPrefix.id);
-            // 自定义API可以不走代理
-            return custom && custom.length > 0 ? custom : dandanplayApi.prefix;
+            // [修复] customList[0] 是对象，需要取 .url
+            const customItem = customList.length > 0 ? customList[0] : null;
+            const customUrl = customItem ? (typeof customItem === 'string' ? customItem : customItem.url) : lsGetItem(lsKeys.customApiPrefix.id);
+            // 自定义API可以不走代理，但必须是合法 URL
+            return customUrl && customUrl.length > 0 && (customUrl.startsWith('http://') || customUrl.startsWith('https://')) ? customUrl : dandanplayApi.prefix;
         },
         getMatchUrl: () => `${dandanplayApiCustom.prefix}/match`,
     }
     const bangumiApi = {
-        prefix: 'https://api.bgm.tv/v0',
+        get prefix() {
+            const custom = lsGetItem(lsKeys.bangumiApiPrefix.id);
+            const base = (custom && custom.length > 0) ? custom : 'https://api.bgm.tv';
+            return base + '/v0';
+        },
+        get imageDomain() {
+            const custom = lsGetItem(lsKeys.bangumiImageDomain.id);
+            return (custom && custom.length > 0) ? custom : 'https://lain.bgm.tv';
+        },
         accessTokenUrl: 'https://next.bgm.tv/demo/access-token',
         getCharacters: (subjectId) => `${bangumiApi.prefix}/subjects/${subjectId}/characters`,
         // need auth
@@ -262,33 +275,33 @@
     const hasToastPrefixes = (comment, prefixes) => Object.values(prefixes).some(prefix => comment.text.startsWith(prefix));
     const getDanmakuComments = (ede) => {
         if (ede.danmaku && ede.danmaku.comments) {
-          return ede.danmaku.comments.filter(c => !hasToastPrefixes(c, toastPrefixes));
+            return ede.danmaku.comments.filter(c => !hasToastPrefixes(c, toastPrefixes));
         }
         return [];
-      };
+    };
     const danmuListOpts = [
         { id: '0', name: '不展示' , onChange: () => [] },
         { id: '1', name: '屏中', onChange: (ede) => ede.danmaku ? ede.danmaku._.runningList : [] },
         { id: '2', name: '所有', onChange: (ede) => ede.commentsParsed },
         { id: '3', name: '已加载', onChange: getDanmakuComments },
         { id: '4', name: '被过滤', onChange: (ede) => {
-            // [优化] 使用 Set 优化差集计算性能，防止卡死
-            const loadedComments = getDanmakuComments(ede);
-            if (!loadedComments || loadedComments.length === 0) return ede.commentsParsed;
+                // [优化] 使用 Set 优化差集计算性能，防止卡死
+                const loadedComments = getDanmakuComments(ede);
+                if (!loadedComments || loadedComments.length === 0) return ede.commentsParsed;
 
-            // 将已加载弹幕的 cuid 存入 Set，查找速度极快
-            const loadedCuids = new Set(loadedComments.map(c => c.cuid));
+                // 将已加载弹幕的 cuid 存入 Set，查找速度极快
+                const loadedCuids = new Set(loadedComments.map(c => c.cuid));
 
-            // 只需要遍历一次即可
-            return ede.commentsParsed.filter(p => !loadedCuids.has(p.cuid));
-        } },
+                // 只需要遍历一次即可
+                return ede.commentsParsed.filter(p => !loadedCuids.has(p.cuid));
+            } },
         { id: '5', name: '已相似合并', onChange: (ede) => {
-        if (ede.danmaku && ede.danmaku.comments) {
-            return ede.danmaku.comments.filter(p => p.xCount);
-        }
-        return [];
-        }
-    },
+                if (ede.danmaku && ede.danmaku.comments) {
+                    return ede.danmaku.comments.filter(p => p.xCount);
+                }
+                return [];
+            }
+        },
         { id: '100', name: '通知', onChange: (ede) => ede.danmaku ? ede.danmaku.comments.filter(c => hasToastPrefixes(c, toastPrefixes)) : [] },
     ];
     const timeoutCallbackUnitOpts = [
@@ -301,11 +314,11 @@
     const timeoutCallbackTypeOpts = [
         { id: '0', name: '不启用' , onChange: () => timeoutCallbackClear() },
         { id: '1', name: '退出播放', onChange: (ms) => {
-            timeoutCallbackClear(), timeoutCallbackId = setTimeout(() => { closeEmbyDialog(), Emby.InputManager.trigger('back') }, ms);
-        } },
+                timeoutCallbackClear(), timeoutCallbackId = setTimeout(() => { closeEmbyDialog(), Emby.InputManager.trigger('back') }, ms);
+            } },
         { id: '2', name: '返回主页', onChange: (ms) => { // Native 播放器不支持.trigger('home'),虽底层一样,但原因未知
-            timeoutCallbackClear(), timeoutCallbackId = setTimeout(() => { closeEmbyDialog(), Emby.Page.goHome() }, ms);
-        } },
+                timeoutCallbackClear(), timeoutCallbackId = setTimeout(() => { closeEmbyDialog(), Emby.Page.goHome() }, ms);
+            } },
     ];
     const getApiTl = fn => fn.toString().match(/\=>\s*(.*)$/)[1].trim().replace(/`/g, '');
     const labels = {
@@ -347,6 +360,8 @@
         bangumiEnable: { id: 'danmakuBangumiEnable', defaultValue: false, name: '启用并填写个人令牌' },
         bangumiToken: { id: 'danmakuBangumiToken', defaultValue: '', name: '个人令牌' },
         bangumiPostPercent: { id: 'danmakuBangumiPostPercent', defaultValue: 95, name: '时长比', min: 1, max: 99, step: 1 },
+        bangumiApiPrefix: { id: 'danmakuBangumiApiPrefix', defaultValue: 'https://api.bgm.tv', name: 'Bangumi API 地址' },
+        bangumiImageDomain: { id: 'danmakuBangumiImageDomain', defaultValue: 'https://lain.bgm.tv', name: 'Bangumi 图片域名' },
         tmdbApiKey: { id: 'danmakuTmdbApiKey', defaultValue: '', name: 'TMDB API Key' },
         tmdbApiBaseUrl: { id: 'danmakuTmdbApiBaseUrl', defaultValue: 'https://api.themoviedb.org', name: 'TMDB API 域名' },
         tmdbEpisodeMappingEnable: { id: 'danmakuTmdbEpisodeMappingEnable', defaultValue: false, name: '启用集数映射' },
@@ -477,6 +492,8 @@
         bangumiTokenLabel: 'bangumiTokenInputLabel',
         bangumiTokenLinkDiv: 'bangumiTokenLinkDiv',
         bangumiPostPercentDiv: 'bangumiPostPercentDiv',
+        bangumiApiPrefixInputDiv: 'bangumiApiPrefixInputDiv',
+        bangumiImageDomainInputDiv: 'bangumiImageDomainInputDiv',
         tmdbEnableLabel: 'tmdbEnableLabel',
         tmdbSettingsDiv: 'tmdbSettingsDiv',
         tmdbApiKeyInput: 'tmdbApiKeyInput',
@@ -553,14 +570,14 @@
                 , msg1: '仅弹弹 play API 跨域使用,限 URL 前缀反代方式,例如 cf_worker'
                 , msg2: '以下共用变量: { dandanplayApi.prefix: 反代前缀拼接的弹弹 play API 路径前缀, }' },
             { divId: eleIds.customeGetCommentDiv, lsKey: lsKeys.customeGetCommentUrl, rewrite: (tl) => {
-                dandanplayApi.getComment = (episodeId, chConvert) => eval('`' + tl + '`');
-            }, msg1: customeUrlMsg1, msg2: '变量: { episodeId: 章节 ID, chConvert: 简繁转换, }' },
+                    dandanplayApi.getComment = (episodeId, chConvert) => eval('`' + tl + '`');
+                }, msg1: customeUrlMsg1, msg2: '变量: { episodeId: 章节 ID, chConvert: 简繁转换, }' },
             { divId: eleIds.customeGetExtcommentDiv, lsKey: lsKeys.customeGetExtcommentUrl, rewrite: (tl) => {
-                dandanplayApi.getExtcomment = (url) => eval('`' + tl + '`');
-            }, msg1: customeUrlMsg1, msg2: '变量: { url: 附加弹幕输入框中的网址, }' },
+                    dandanplayApi.getExtcomment = (url) => eval('`' + tl + '`');
+                }, msg1: customeUrlMsg1, msg2: '变量: { url: 附加弹幕输入框中的网址, }' },
             { divId: eleIds.customePosterImgDiv, lsKey: lsKeys.customePosterImgUrl, rewrite: (tl) => {
-                dandanplayApi.posterImg = (animeId) => eval('`' + tl + '`');
-            }, msg1: customeUrlMsg1, msg2: '变量: { animeId: 弹弹 play 的作品 ID, }' },
+                    dandanplayApi.posterImg = (animeId) => eval('`' + tl + '`');
+                }, msg1: customeUrlMsg1, msg2: '变量: { animeId: 弹弹 play 的作品 ID, }' },
         ],
     };
     // emby ui class
@@ -691,7 +708,7 @@
         } else {
             logger.error('[弹幕引擎] 内联加载异常: window.Danmaku 和 Danmaku 均为 undefined，可能存在 AMD/模块系统冲突');
         }
-     } else {
+    } else {
         // 网络加载 + 动态修复 AMD
         // 必须使用 fetch 下载 -> 修改 -> Blob 执行，才能拦截 define 调用
         logger.info('[弹幕引擎] 使用网络模式加载 Danmaku 库 (CustomCssJS 环境), 路径:', requireDanmakuPath);
@@ -909,7 +926,7 @@
             this.tempLsValues = {};   // 临时存储的由程序更改后的 ls 值
             this.asymmetricAuthEnabled = false;
             this.publicKeyPem = null;   // 客户端公钥（用于验证Worker签名）
-            this.abortControllers = new Set();  // 全局请求控制器集合 (用于组件销毁时取消所有网络请求)
+            this.abortControllers = new Set();  // 页面级请求控制器集合 (用于组件销毁时取消 UI 相关网络请求)
         }
     }
 
@@ -1028,7 +1045,7 @@
             const emoji = level.emoji ? `[${level.emoji}] ` : '';
             return `[${new Date(Date.now()).toLocaleString()}] [${level.text}] ${emoji}: `
                 + args.map(arg => arg instanceof Error ? arg.message : (typeof arg === 'string' ? arg : JSON.stringify(arg)))
-                .join(' ') + '\n';
+                    .join(' ') + '\n';
         }
         on(valueChangedCallback) {
             if (valueChangedCallback.toString().includes('console.log')
@@ -1073,7 +1090,7 @@
         // Emby 点"下一集/上一集"时不会离开 video-osd 页面，beforeDestroy 不会触发，
         // 必须在 playbackstop 时保存，否则推理匹配永远拿不到上一集的信息
         if (window.ede && window.ede.episode_info) {
-            window.ede.previous_episode_info = window.ede.episode_info;
+            window.ede.previous_episode_info = { ...window.ede.episode_info };
             logger.debug(`[推理匹配] 已保存当前集信息: episodeId=${window.ede.episode_info.episodeId}, episodeIndex=${window.ede.episode_info.episodeIndex}`);
         }
         onPlaybackStopPct(e, state);
@@ -1087,14 +1104,14 @@
             buildProgressBarChart(20);
         }
         if (lsGetItem(lsKeys.osdHeaderClockEnable.id)) {
-          addHeaderClock();
+            addHeaderClock();
         }
     }
 
     function onVideoOsdHide(e) {
         logger.debug('监听到事件: OSD隐藏 (video-osd-hide)');
         if (lsGetItem(lsKeys.osdHeaderClockEnable.id)) {
-          removeHeaderClock();
+            removeHeaderClock();
         }
     }
 
@@ -1460,63 +1477,91 @@
         return best;
     }
 
-    // [改造2] 多维度评分（接收预标准化的 searchTitle）
+    // [综合优化] 多维度评分 - 融合两版优势：条件加分机制 + bigram 精确相似度 + 用户偏好
     function calculateMatchScore(normalizedSearch, candidate, parsedSearch) {
-        let total = 0;
         const candidateYear = candidate.animeTitle?.match(/\((\d{4})\)/)?.[1] | 0;
-        const pureCandTitle = normalizeTitle(candidate.animeTitle.replace(/\(\d{4}\)/, ''));
-        const candidateTitle = normalizeTitle(candidate.animeTitle);
+        const pureCandTitle = cleanTitleForComparison(candidate.animeTitle.replace(/\(\d{4}\)/, ''));
+        const candidateTitle = cleanTitleForComparison(candidate.animeTitle);
 
-        // 1. 精确匹配 (0~0.35)
-        const exactMatch = (normalizedSearch === pureCandTitle || normalizedSearch === candidateTitle) ? 0.35
-            : pureCandTitle.startsWith(normalizedSearch) ? 0.30
-            : (candidateTitle.includes(normalizedSearch) || normalizedSearch.includes(candidateTitle)) ? 0.20
-            : 0;
-
-        // 2. 标题相似度 (0~0.25)
-        const titleSim = calculateStringSimilarity(normalizedSearch, candidateTitle) * 0.25;
-
-        // 3. 季度匹配 (半硬约束, -0.30~0.20)
-        // [增强] 对候选标题做独立解析，不依赖搜索标题的包含关系
-        let seasonMatch = 0;
-        const parsedCand = parseCandidateTitle(candidate.animeTitle);
-        const candSeason = parsedCand.season || detectSeasonFromTitle(candidate.animeTitle, normalizedSearch);
-        if (parsedSearch?.season) {
-            seasonMatch = candSeason === parsedSearch.season ? 0.20
-                : candSeason ? -0.30
-                : parsedSearch.season === 1 ? 0.10 : -0.05;
+        // 1. 名字得分 (0~0.40) - 基于 bigram 相似度
+        let nameScore = 0;
+        const exactMatch = normalizedSearch === pureCandTitle || normalizedSearch === candidateTitle;
+        if (exactMatch) {
+            nameScore = 0.40;
+        } else if (pureCandTitle.includes(normalizedSearch) || normalizedSearch.includes(pureCandTitle)) {
+            nameScore = 0.35;
+        } else if (candidateTitle.includes(normalizedSearch) || normalizedSearch.includes(candidateTitle)) {
+            nameScore = 0.30;
+        } else {
+            nameScore = calculateStringSimilarity(normalizedSearch, candidateTitle) * 0.40;
         }
 
-        // 4. 年份匹配 (-0.10~0.10)
-        let yearMatch = 0;
+        // 2. 年份匹配 (-0.20~0.20)
+        let yearScore = 0;
         if (parsedSearch?.year && candidateYear) {
             const diff = Math.abs(candidateYear - parsedSearch.year);
-            yearMatch = diff === 0 ? 0.10 : diff <= 1 ? 0.05 : -0.10;
+            yearScore = diff === 0 ? 0.20 : diff === 1 ? 0.10 : -0.20;
         }
 
-        // 5. 类型 (-0.05~0.05)
+        // 3. 季度匹配 (-0.20~0.20) - [条件加分] 只在名字得分 >= 0.20 时生效，避免误匹配
+        let seasonScore = 0;
+        const parsedCand = parseCandidateTitle(candidate.animeTitle);
+        const candSeason = parsedCand.season || detectSeasonFromTitle(candidate.animeTitle, normalizedSearch);
+        if (parsedSearch?.season && nameScore >= 0.20) {
+            if (candSeason === parsedSearch.season) {
+                seasonScore = 0.20;
+            } else if (candSeason) {
+                const sDiff = Math.abs(candSeason - parsedSearch.season);
+                seasonScore = sDiff === 1 ? -0.05 : -0.20;
+            } else {
+                seasonScore = parsedSearch.season === 1 ? 0.10 : -0.05;
+            }
+        }
+
+        // 4. 集数匹配 (-0.20~0.20) - [条件加分] 只在名字得分 >= 0.20 时生效
+        let episodeScore = 0;
+        const targetEp = parsedSearch?.episode;
+        if (targetEp && nameScore >= 0.20 && candidate.episodes?.length > 0) {
+            const matchedEp = candidate.episodes.find(ep => parseInt(ep.episodeNumber) === targetEp);
+            if (matchedEp) {
+                episodeScore = 0.20;
+                candidate._matchedEpisodeId = matchedEp.episodeId;
+            } else {
+                const epNums = candidate.episodes.map(ep => parseInt(ep.episodeNumber)).filter(n => n > 0);
+                if (epNums.length > 0) {
+                    const minEp = Math.min(...epNums), maxEp = Math.max(...epNums);
+                    if (targetEp < minEp) episodeScore = -0.10;
+                    else if (targetEp > maxEp) episodeScore = -0.10;
+                    else episodeScore = -0.05;
+                }
+            }
+        }
+
+        // 5. 关键词辅助 (0~0.05)
+        let keywordScore = 0;
+        if (nameScore < 0.30) {
+            const sKw = extractKeywords(normalizedSearch);
+            const cKw = extractKeywords(candidate.animeTitle);
+            const hits = sKw.filter(k => cKw.some(c => c.includes(k) || k.includes(c))).length;
+            keywordScore = (hits / Math.max(sKw.length, 1)) * 0.05;
+        }
+
+        // 6. 类型加成 (-0.05~0.05)
         const hasSE = parsedSearch?.season || parsedSearch?.episode;
         const typeMap = hasSE
             ? { tvseries: 0.05, tvspecial: 0.03, web: 0.02, movie: -0.05 }
             : { movie: 0.05, tvseries: 0.02 };
         const typeBonus = typeMap[candidate.type] || 0;
 
-        // 6. 集数完整度 (-0.05~0.05)
-        const ep = parsedSearch?.episode;
-        const epComplete = ep && candidate.episodes?.length ? (candidate.episodes.length >= ep ? 0.05 : -0.05)
-            : ep && candidate.episodeCount ? (candidate.episodeCount >= ep ? 0.03 : 0) : 0;
-
-        // 7. 关键词匹配 (0~0.10) — 只在精确匹配分低时补充
-        let kwMatch = 0;
-        if (exactMatch < 0.30) {
-            const sKw = extractKeywords(normalizedSearch);
-            const cKw = extractKeywords(candidate.animeTitle);
-            const hits = sKw.filter(k => cKw.some(c => c.includes(k) || k.includes(c))).length;
-            kwMatch = (hits / Math.max(sKw.length, 1)) * 0.10;
-        }
-
-        total = exactMatch + titleSim + seasonMatch + yearMatch + typeBonus + epComplete + kwMatch;
-        return { exactMatch, titleSimilarity: titleSim, seasonMatch, yearMatch, typeBonus, episodeCompleteness: epComplete, keywordMatch: kwMatch, total };
+        const total = nameScore + yearScore + seasonScore + episodeScore + keywordScore + typeBonus;
+        return {
+            nameScore, yearScore, seasonScore, episodeScore,
+            keywordScore, typeBonus,
+            exactMatch: exactMatch ? 1 : 0,
+            titleSimilarity: nameScore, seasonMatch: seasonScore, yearMatch: yearScore,
+            episodeCompleteness: episodeScore, keywordMatch: keywordScore,
+            total
+        };
     }
 
     // 标题标准化函数
@@ -1525,7 +1570,48 @@
             .replace(/[^\w\s\u4e00-\u9fff]/g, '').trim();
     }
 
-    // 解析搜索关键词，提取标题/季/集/年份
+    // [综合优化] 从标题任意位置提取季度
+    function extractSeasonNumber(title) {
+        if (!title) return null;
+        const t = title.toLowerCase();
+
+        // 阿拉伯数字/中文季号
+        const numMatch = t.match(/(?:第\s*([一二三四五六七八九十零\d]+)\s*[季部期]|season\s*(\d+)|s(\d+)(?![e\d\w]))/);
+        if (numMatch) {
+            const chineseNums = { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10,'零':0 };
+            const m = numMatch[1];
+            if (m && isNaN(parseInt(m))) {
+                if (m.length === 1 && chineseNums[m] !== undefined) return chineseNums[m];
+                else if (m.length === 2 && m[0] === '十') return 10 + (chineseNums[m[1]] || 0);
+                else if (m.includes('十')) { const parts = m.split('十'); return (chineseNums[parts[0]] || 1) * 10 + (chineseNums[parts[1]] || 0); }
+                else return chineseNums[m];
+            }
+            return parseInt(numMatch[1] || numMatch[2] || numMatch[3]);
+        }
+
+        // 英文序数词季号
+        const spelledOrdinals = {
+            'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5, 'sixth': 6,
+            'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10
+        };
+        for (const [word, num] of Object.entries(spelledOrdinals)) {
+            if (t.includes(word + ' season') || t.includes(word + ' series')) return num;
+        }
+
+        // 罗马数字季号
+        const romanMatch = t.match(/\b([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]|ii|iii|iv|vi|vii|viii|ix|xi|xii)\b(?:\s*[季期部])?/);
+        if (romanMatch) {
+            const romanToNum = {
+                'Ⅰ':1,'Ⅱ':2,'Ⅲ':3,'Ⅳ':4,'Ⅴ':5,'Ⅵ':6,'Ⅶ':7,'Ⅷ':8,'Ⅸ':9,'Ⅹ':10,'Ⅺ':11,'Ⅻ':12,
+                'ii':2,'iii':3,'iv':4,'vi':6,'vii':7,'viii':8,'ix':9,'xi':11,'xii':12
+            };
+            return romanToNum[romanMatch[1]] || null;
+        }
+
+        return null;
+    }
+
+    // [综合优化] 解析搜索关键词，提取标题/季/集/年份
     function parseSearchKeyword(keyword) {
         keyword = cleanFileNameNoise(keyword.trim());
 
@@ -1538,43 +1624,145 @@
             if (ym2 && ym2[1] >= 1990 && ym2[1] <= 2030) { year = parseInt(ym2[1]); keyword = keyword.replace(ym2[1], ' ').replace(/\s{2,}/g, ' ').trim(); }
         }
 
-        // SXXEXX
+        // 提取集数
+        let episode = null;
         const se = /^(.+?)[\s._-]*S(\d{1,2})[\s._-]*E(\d{1,4})$/i.exec(keyword);
-        if (se) return { title: cleanTitleTail(se[1]), season: parseInt(se[2]), episode: parseInt(se[3]), year };
-
-        // 季度
-        const patterns = [
-            { p: /^(.*?)[\s._-]*(?:S|Season)[\s._-]*(\d{1,2})$/i, h: m => parseInt(m[2]) },
-            { p: /^(.*?)\s*第\s*([一二三四五六七八九十\d]+)\s*[季部]$/i, h: m => _CN_NUM[m[2]] || parseInt(m[2]) },
-            { p: /^(.*?)\s*([Ⅰ-Ⅻ])$/, h: m => _ROMAN[m[2]] },
-            { p: /^(.*?)\s+(\d{1,2})$/, h: m => parseInt(m[2]) }
-        ];
-        for (const { p, h } of patterns) {
-            const m = p.exec(keyword);
-            if (m) { try { const t = cleanTitleTail(m[1]), s = h(m); if (s && !(t.length > 4 && /\d{4}$/.test(t))) return { title: t, season: s, episode: null, year }; } catch(e) {} }
+        if (se) {
+            return { title: cleanTitleTail(se[1]), season: parseInt(se[2]), episode: parseInt(se[3]), year };
         }
-        return { title: cleanTitleTail(keyword), season: null, episode: null, year };
-    }
 
-    // 编辑距离相似度
-    function calculateStringSimilarity(str1, str2) {
-        const s1 = str1.toLowerCase().replace(/[：:]/g, '');
-        const s2 = str2.toLowerCase().replace(/[：:]/g, '');
-        if (s1 === s2) return 1.0;
-        if (s1.includes(s2) || s2.includes(s1)) return 0.8;
-        const n = s1.length, m = s2.length;
-        // 优化：长度差距太大直接返回低相似度
-        if (Math.abs(n - m) > Math.max(n, m) * 0.6) return 0.2;
-        const dp = Array.from({length: n + 1}, (_, i) => i);
-        for (let j = 1; j <= m; j++) {
-            let prev = dp[0]; dp[0] = j;
-            for (let i = 1; i <= n; i++) {
-                const tmp = dp[i];
-                dp[i] = s1[i-1] === s2[j-1] ? prev : Math.min(prev, dp[i], dp[i-1]) + 1;
-                prev = tmp;
+        const epPatterns = [
+            /[Ee](\d+)/,
+            /(?:^|[^\d])第\s*(\d+)\s*(?:集|话|话(?:\s*\/\s*)?第?\s*\d+\s*(?:集|话)?|卷)$/,
+            /(?<![SpPeE])\b(\d{2,4})\s*话?(?=\s*(?:END|完|OVA|OAD|SP|BD|剧场版|\s*$))/i,
+            /^(\d{1,3})(?=\s*(?:END|完|OVA|OAD|剧场版))/i,
+        ];
+        for (const pat of epPatterns) {
+            const m = keyword.match(pat);
+            if (m) { episode = parseInt(m[1]); break; }
+        }
+        if (episode !== null) keyword = keyword.replace(/([Ee]?\d+|\[?\d{1,2}\]?\s*(?:集|话|OVA|OAD|END|完))/g, '');
+
+        // 提取季度 (使用新增的 extractSeasonNumber)
+        let season = extractSeasonNumber(keyword);
+
+        if (season !== null) {
+            // 清理季度信息以防干扰标题匹配
+            keyword = keyword.replace(/第\s*[一二三四五六七八九十零\d]+\s*[季部期]/i, '')
+                .replace(/\b(?:second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+season\b/gi, '')
+                .replace(/\bS\d{1,2}\b/gi, '');
+        } else {
+            // 旧的回退逻辑
+            const patterns = [
+                { p: /^(.*?)[\s._-]*(?:S|Season)[\s._-]*(\d{1,2})$/i, h: m => parseInt(m[2]) },
+                { p: /^(.*?)\s*([Ⅰ-Ⅻ])$/, h: m => _ROMAN[m[2]] },
+                { p: /^(.*?)\s+(\d{1,2})$/, h: m => parseInt(m[2]) }
+            ];
+            for (const { p, h } of patterns) {
+                const m = p.exec(keyword);
+                if (m) {
+                    try {
+                        const t = cleanTitleTail(m[1]);
+                        const s = h(m);
+                        if (s && !(t.length > 4 && /\d{4}$/.test(t))) {
+                            season = s;
+                            keyword = t;
+                            break;
+                        }
+                    } catch(e) {}
+                }
             }
         }
-        return Math.max(n, m) === 0 ? 1 : (Math.max(n, m) - dp[n]) / Math.max(n, m);
+
+        // 清理残余标记
+        keyword = keyword.replace(/\s*-\s*(?:S\d+|SP|OVA|OAD|BD|剧场版)\s*$/i, '').replace(/\s+/g, ' ').trim();
+        return { title: cleanTitleTail(keyword), season, episode, year };
+    }
+
+    // [优化] 清理标题中的附加信息，用于更精确的比较
+    function cleanTitleForComparison(title) {
+        return title
+            .replace(/\s*[\(（].*?[\)）]/g, '')        // 移除括号内容: (2025), （来源：xxx）
+            .replace(/\s*【.*?】/g, '')                 // 移除【电视剧】等
+            .replace(/\s*from\s+\w+/gi, '')             // 移除 from renren 等
+            .replace(/\s*（并行\s*来源.*$/g, '')         // 移除 （并行 来源：xxx 年份：xxx）
+            .replace(/\s*（来源.*$/g, '')                // 移除 （来源：xxx）
+            // 季集编号归一化: S01E01/s1e1/S1/s01 统一为不带前导零的格式
+            .replace(/[Ss](\d+)[Ee](\d+)/g, (_, s, e) => `S${parseInt(s)}E${parseInt(e)}`)
+            .replace(/[Ss](\d+)(?![Ee\d])/g, (_, s) => `S${parseInt(s)}`)
+            .trim();
+    }
+
+    // [综合优化] 字符串相似度计算 - 融合 bigram Dice 系数 + 编辑距离 + CJK 优化
+    function calculateStringSimilarity(str1, str2) {
+        if (!str1 || !str2) return 0;
+
+        // 先清理附加信息再比较
+        const s1 = cleanTitleForComparison(str1).toLowerCase().replace(/[：:]/g, '');
+        const s2 = cleanTitleForComparison(str2).toLowerCase().replace(/[：:]/g, '');
+
+        if (s1 === s2) return 1.0;
+        if (s1.length === 0 || s2.length === 0) return 0;
+
+        // 包含关系处理 - 加入 CJK 字符优化
+        if (s1.includes(s2) || s2.includes(s1)) {
+            const shorter = Math.min(s1.length, s2.length);
+            const longer = Math.max(s1.length, s2.length);
+            const baseSim = 0.9 * (shorter / longer);
+
+            // [CJK 优化] 解决中文标题加英文副标题的问题（如"一人之下 THE OUTCAST"）
+            // 若短串全部 CJK 字符都命中了长串的 CJK 字符，则按 CJK 字符数比例重新计算
+            const cjkReg = /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\u31f0-\u31ff]/g;
+            const s1Cjk = (s1.match(cjkReg) || []).length;
+            const s2Cjk = (s2.match(cjkReg) || []).length;
+            if (s1Cjk > 0 && s2Cjk > 0 && s1Cjk <= s2Cjk) {
+                const cjkSim = 0.85 * (s1Cjk / s2Cjk);
+                return Math.max(baseSim, cjkSim);
+            }
+            return baseSim;
+        }
+
+        const n = s1.length, m = s2.length;
+
+        // 优化：长度差距太大直接返回低相似度
+        if (Math.abs(n - m) > Math.max(n, m) * 0.6) return 0.2;
+
+        // 单字符无法生成 bigram，退化为字符比较
+        if (n === 1 || m === 1) {
+            return s1.charAt(0) === s2.charAt(0) ? 0.3 : 0;
+        }
+
+        // [优化] 使用 bigram Dice 系数 - 要求连续两字匹配，避免单字碰巧相同的误判
+        const bigrams1 = new Set();
+        for (let i = 0; i < n - 1; i++) bigrams1.add(s1.substring(i, i + 2));
+        const bigrams2 = new Set();
+        for (let i = 0; i < m - 1; i++) bigrams2.add(s2.substring(i, i + 2));
+
+        let intersection = 0;
+        for (const bigram of bigrams1) {
+            if (bigrams2.has(bigram)) intersection++;
+        }
+
+        const diceSim = (2 * intersection) / (bigrams1.size + bigrams2.size);
+
+        // [混合策略] 对于较短的字符串，编辑距离更可靠；对于较长的字符串，bigram 更精确
+        if (Math.max(n, m) < 6) {
+            // 短字符串：使用编辑距离
+            const dp = Array.from({length: n + 1}, (_, i) => i);
+            for (let j = 1; j <= m; j++) {
+                let prev = dp[0]; dp[0] = j;
+                for (let i = 1; i <= n; i++) {
+                    const tmp = dp[i];
+                    dp[i] = s1[i-1] === s2[j-1] ? prev : Math.min(prev, dp[i], dp[i-1]) + 1;
+                    prev = tmp;
+                }
+            }
+            const editSim = (Math.max(n, m) - dp[n]) / Math.max(n, m);
+            return Math.max(diceSim, editSim); // 取两者较大值
+        }
+
+        // 长字符串：使用 bigram
+        return diceSim;
     }
 
     // 提取关键词
@@ -1607,31 +1795,31 @@
         // 清除年份括号
         let clean = title.replace(/\(\d{4}\)/, '').trim();
 
-        // 模式列表：从最具体到最模糊
+        // [综合优化] 支持任意位置的季度提取
         const patterns = [
-            // "第X季" / "第X部"
-            { p: /^(.*?)\s*第\s*([一二三四五六七八九十\d]+)\s*[季部期]$/i, h: m => _CN_NUM[m[2]] || parseInt(m[2]) },
-            // "Season X" / "S3"
-            { p: /^(.*?)\s*(?:Season|S)\s*(\d{1,2})$/i, h: m => parseInt(m[2]) },
-            // "2nd Season" / "3rd Season"
-            { p: /^(.*?)\s*(\d{1,2})(?:st|nd|rd|th)\s*Season$/i, h: m => parseInt(m[2]) },
-            // 罗马数字 "XXX Ⅲ"
-            { p: /^(.*?)\s*([Ⅰ-Ⅻ])$/, h: m => _ROMAN[m[2]] },
-            // "XXX II" / "XXX III" (英文罗马) — 仅匹配末尾的 II/III/IV 等
-            { p: /^(.*?)\s+(II|III|IV|V|VI|VII|VIII|IX|X)$/i, h: m => ({ 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6, 'VII': 7, 'VIII': 8, 'IX': 9, 'X': 10 })[m[2].toUpperCase()] },
+            // "第X季" / "第X部" (任意位置)
+            { p: /(.*?)\s*第\s*([一二三四五六七八九十零\d]+)\s*[季部期](.*)/i, h: m => _CN_NUM[m[2]] || parseInt(m[2]), f: m => m[1] + ' ' + m[3] },
+            // "Season X" / "S3" (任意位置)
+            { p: /(.*?)\s*(?:Season|S)\s*(\d{1,2})\b(.*)/i, h: m => parseInt(m[2]), f: m => m[1] + ' ' + m[3] },
+            // "2nd Season" / "3rd Season" (任意位置)
+            { p: /(.*?)\s*(\d{1,2})(?:st|nd|rd|th)\s*Season(.*)/i, h: m => parseInt(m[2]), f: m => m[1] + ' ' + m[3] },
+            // 罗马数字 "XXX Ⅲ" (任意位置)
+            { p: /(.*?)\s*([Ⅰ-Ⅻ])(?:\s*[季期部])?(.*)/, h: m => _ROMAN[m[2]], f: m => m[1] + ' ' + m[3] },
+            // "XXX II" / "XXX III" (英文罗马) (任意位置)
+            { p: /(.*?)\s+\b(II|III|IV|V|VI|VII|VIII|IX|X)\b(?:\s*[季期部])?(.*)/i, h: m => ({ 'II': 2, 'III': 3, 'IV': 4, 'V': 5, 'VI': 6, 'VII': 7, 'VIII': 8, 'IX': 9, 'X': 10 })[m[2].toUpperCase()], f: m => m[1] + ' ' + m[3] },
         ];
 
-        for (const { p, h } of patterns) {
+        for (const { p, h, f } of patterns) {
             const m = p.exec(clean);
             if (m) {
                 try {
                     const season = h(m);
-                    if (season) return { title: m[1].trim(), season };
+                    if (season) return { title: cleanTitleForComparison(f(m)).trim(), season };
                 } catch(e) {}
             }
         }
 
-        return { title: clean, season: null };
+        return { title: cleanTitleForComparison(clean).trim(), season: null };
     }
 
     // 从候选标题中推断季度（兼容旧逻辑：优先独立解析，回退到相对检测）
@@ -1765,7 +1953,7 @@
         }
     }
     async function fetchComment(episodeId, overridePrefix) {
-         // [修复] 支持指定源：推理匹配时传入上一集使用的源，避免多源混淆
+        // [修复] 支持指定源：推理匹配时传入上一集使用的源，避免多源混淆
         const prefix = overridePrefix || window.ede.episode_info?.apiPrefix || dandanplayApi.prefix;
         const url = `${prefix}/comment/${episodeId}?withRelated=true&chConvert=${window.ede.chConvert}`;
 
@@ -1776,7 +1964,7 @@
                 const endTime = performance.now();
                 const duration = (endTime - startTime).toFixed(0);
 
-                 // 兼容不同 API 的返回格式：
+                // 兼容不同 API 的返回格式：
                 // - 标准格式: { comments: [...] }
                 // - 嵌套格式: { data: { comments: [...] } }
                 // - 直接数组: [...]
@@ -1814,13 +2002,16 @@
         logger.debug(`结束播放百分比: ${pct}%`);
         const bangumiPostPercent = lsGetItem(lsKeys.bangumiPostPercent.id);
         const bangumiToken = lsGetItem(lsKeys.bangumiToken.id);
+        const currentEpisodeInfo = window.ede.episode_info;
         if (lsGetItem(lsKeys.bangumiEnable.id) && bangumiToken
-            && pct >= bangumiPostPercent && window.ede.episode_info.episodeId
+            && pct >= bangumiPostPercent && currentEpisodeInfo?.episodeId
         ) {
             logger.debug(`大于需提交的设定百分比: ${bangumiPostPercent}%`);
-            const { animeTitle, episodeTitle } = window.ede.episode_info;
+            const { animeTitle, episodeTitle } = currentEpisodeInfo;
             const targetName = `${animeTitle} - ${episodeTitle}`;
-            putBangumiEpStatus(bangumiToken).then(res => {
+            const episodeInfo = { ...currentEpisodeInfo };
+            const backgroundFetchOpts = { abortOnDestroy: false };
+            putBangumiEpStatus(bangumiToken, { episodeInfo, fetchOpts: backgroundFetchOpts }).then(res => {
                 embyToast({ text: `Bangumi收藏更新成功, 目标: ${targetName}, 结束播放百分比: ${pct}%, 大于需提交的设定百分比: ${bangumiPostPercent}%`});
                 logger.info(`Bangumi收藏更新成功, 目标: ${targetName}`);
             }).catch(error => {
@@ -1830,8 +2021,26 @@
         }
     }
 
-    async function getEpisodeBangumiRel() {
-        const episode_info = window.ede.episode_info;
+    function isValidEpisodeIndex(value) {
+        if (value === null || value === undefined || value === '') {
+            return false;
+        }
+        const num = Number(value);
+        return Number.isInteger(num) && num >= 0;
+    }
+
+    function deriveBgmEpisodeIndex(previousInfo, fallbackEpisodeIndex, delta) {
+        if (previousInfo && isValidEpisodeIndex(previousInfo.bgmEpisodeIndex)) {
+            const derived = Number(previousInfo.bgmEpisodeIndex) + delta;
+            if (isValidEpisodeIndex(derived)) {
+                return derived;
+            }
+        }
+        return isValidEpisodeIndex(fallbackEpisodeIndex) ? Number(fallbackEpisodeIndex) : null;
+    }
+
+    async function getEpisodeBangumiRel(episode_info = window.ede.episode_info, fetchOpts = {}) {
+        if (!episode_info) { throw new Error('未获取到 episode_info'); }
         const _bangumi_key = lsLocalKeys.bangumiEpInfoPrefix + episode_info.episodeId;
         let bangumiInfoLs = localStorage.getItem(_bangumi_key);
         if (bangumiInfoLs) {
@@ -1841,48 +2050,76 @@
         let subjectId = bangumiInfoLs ? bangumiInfoLs.subjectId : null;
         let bangumiUrl = bangumiInfoLs ? bangumiInfoLs.bangumiUrl : null;
         const animeId = episode_info.animeId;
+        const bangumiId = episode_info.bangumiId || animeId;
         if (!subjectId) {
-            if (!animeId) { throw new Error('未获取到 animeId'); }
-            const danDanPlayBangumiRes = await fetchJson(dandanplayApi.getBangumi(animeId));
-            episode_info.bgmEpisodeIndex = offsetBgmEpisodeIndex(episode_info.bgmEpisodeIndex, danDanPlayBangumiRes.bangumi);
-            bangumiUrl = danDanPlayBangumiRes.bangumi.bangumiUrl;
+            if (!bangumiId) { throw new Error('未获取到 bangumiId/animeId'); }
+            const officialPrefix = `${corsProxy}https://api.dandanplay.net/api/v2`;
+            const normalizePrefix = prefix => (prefix || '').replace(/\/+$/, '');
+            const primaryPrefix = normalizePrefix(episode_info.apiPrefix || dandanplayApi.prefix || officialPrefix);
+            const fallbackPrefix = normalizePrefix(officialPrefix);
+            const fetchBangumiByPrefix = prefix => fetchJson(`${prefix}/bangumi/${bangumiId}`, fetchOpts);
+
+            let danDanPlayBangumiRes = null;
+            try {
+                danDanPlayBangumiRes = await fetchBangumiByPrefix(primaryPrefix);
+            } catch (error) {
+                if (primaryPrefix && primaryPrefix !== fallbackPrefix) {
+                    logger.warn(`[Bangumi] 源 ${primaryPrefix} 查询 /bangumi/${bangumiId} 失败，回退官方源: ${error.message || error}`);
+                    danDanPlayBangumiRes = await fetchBangumiByPrefix(fallbackPrefix);
+                } else {
+                    throw error;
+                }
+            }
+
+            const danDanPlayBangumi = danDanPlayBangumiRes?.bangumi || danDanPlayBangumiRes;
+            episode_info.bgmEpisodeIndex = offsetBgmEpisodeIndex(episode_info.bgmEpisodeIndex, danDanPlayBangumi);
+            bangumiUrl = danDanPlayBangumi?.bangumiUrl;
             if (!bangumiUrl) { throw new Error('未请求到 bangumiUrl'); }
             subjectId = parseInt(bangumiUrl.match(/\/(\d+)$/)[1]);
         }
         const episodeIndex = episode_info ? episode_info.episodeIndex : null;
         const bgmEpisodeIndex = episode_info ? episode_info.bgmEpisodeIndex : null;
-        const bangumiInfo = { animeId, bangumiUrl, subjectId, episodeIndex, bgmEpisodeIndex, bangumiEpsRes, _bangumi_key };
+        const bangumiInfo = { animeId, bangumiId, bangumiUrl, subjectId, episodeIndex, bgmEpisodeIndex, bangumiEpsRes, _bangumi_key };
         window.ede.bangumiInfo = bangumiInfo;
         localStorage.setItem(bangumiInfo._bangumi_key, JSON.stringify(bangumiInfo));
         return bangumiInfo;
     }
 
     function offsetBgmEpisodeIndex(currentBgmEpisodeIndex, danDanPlayBangumi) {
-        if (!danDanPlayBangumi) {
+        if (!danDanPlayBangumi || !Array.isArray(danDanPlayBangumi.episodes)) {
             return currentBgmEpisodeIndex;
         }
-        let bangumiEp = danDanPlayBangumi.episodes[currentBgmEpisodeIndex];
+        if (!isValidEpisodeIndex(currentBgmEpisodeIndex)) {
+            return currentBgmEpisodeIndex;
+        }
+        const normalizedIndex = Number(currentBgmEpisodeIndex);
+        let bangumiEp = danDanPlayBangumi.episodes[normalizedIndex];
         if (!bangumiEp) {
             logger.debug(`未匹配到 danDanPlayBangumi 番剧集数,剧集不为第一季,尝试切换接口数据匹配返回修正后的 bgmEpisodeIndex`);
-            return danDanPlayBangumi.episodes.findIndex(ep => ep.episodeNumber == currentBgmEpisodeIndex + 1);
+            const fallbackIndex = danDanPlayBangumi.episodes.findIndex(ep => ep.episodeNumber == normalizedIndex + 1);
+            return fallbackIndex >= 0 ? fallbackIndex : currentBgmEpisodeIndex;
         } else {
-            return currentBgmEpisodeIndex;
+            return normalizedIndex;
         }
     }
 
-    async function putBangumiEpStatus(token) {
-        const bangumiInfo = await getEpisodeBangumiRel();
+    async function putBangumiEpStatus(token, opts = {}) {
+        const fetchOpts = opts.fetchOpts || {};
+        const bangumiInfo = await getEpisodeBangumiRel(opts.episodeInfo, fetchOpts);
         const { subjectId, bgmEpisodeIndex, } = bangumiInfo;
-        const episodeIndex = bgmEpisodeIndex ? bgmEpisodeIndex : bangumiInfo.episodeIndex;
+        const episodeIndex = isValidEpisodeIndex(bgmEpisodeIndex) ? Number(bgmEpisodeIndex) : Number(bangumiInfo.episodeIndex);
+        if (!isValidEpisodeIndex(episodeIndex)) {
+            throw new Error('未获取到有效 Bangumi 章节索引');
+        }
         logger.debug('准备校验 Bangumi 条目收藏状态是否为看过');
         let bangumiMe = localStorage.getItem(lsLocalKeys.bangumiMe);
         if (bangumiMe) {
             bangumiMe = JSON.parse(bangumiMe);
         } else {
-            bangumiMe = await fetchBangumiApiGetMe(token);
+            bangumiMe = await fetchBangumiApiGetMe(token, fetchOpts);
         }
         let msg = '';
-        const bangumiUserColl = await fetchJson(bangumiApi.getUserCollection(bangumiMe.username, subjectId), { token });
+        const bangumiUserColl = await fetchJson(bangumiApi.getUserCollection(bangumiMe.username, subjectId), { ...fetchOpts, token });
         if (bangumiUserColl.type === 2) { // 看过状态
             msg = 'Bangumi 条目已为看过状态,跳过更新';
             logger.debug(msg, bangumiUserColl);
@@ -1890,10 +2127,10 @@
         }
         logger.debug('准备修改 Bangumi 条目收藏状态为在看, 如果不存在则创建, 如果存在则修改');
         let body = { type: 3 }; // 在看状态
-        await fetchJson(bangumiApi.postUserCollection(subjectId), { token, body });
+        await fetchJson(bangumiApi.postUserCollection(subjectId), { ...fetchOpts, token, body });
         if (!bangumiInfo.bangumiEpsRes) {
             const fetchUrl = bangumiApi.getUserSubjectEpisodeCollection(subjectId);
-            const bangumiEpsRes = await fetchJson(fetchUrl, { token });
+            const bangumiEpsRes = await fetchJson(fetchUrl, { ...fetchOpts, token });
             bangumiInfo.bangumiEpsRes = bangumiEpsRes;
             const bangumiEpColl = bangumiEpsRes.data[episodeIndex];
             if (!bangumiEpColl) { throw new Error('未匹配到 bangumiEpColl'); }
@@ -1908,7 +2145,7 @@
         }
         logger.debug('准备更新 Bangumi 章节收藏状态, 详情: ', bangumiEp);
         body.type = 2; // 看过状态
-        await fetchJson(bangumiApi.putUserEpisodeCollection(bangumiEp.id), { token, body, method: 'PUT' });
+        await fetchJson(bangumiApi.putUserEpisodeCollection(bangumiEp.id), { ...fetchOpts, token, body, method: 'PUT' });
         bangumiEp.type = body.type;
         logger.info(`成功更新 Bangumi 章节收藏状态, 在看 => 看过, 详情: `, bangumiEp);
         window.ede.bangumiInfo = bangumiInfo;
@@ -1917,155 +2154,170 @@
     }
 
     async function fetchJson(url, opts = {}) {
-    const { token, headers, body } = opts;
-    let { method = 'GET' } = opts;
-    if (method === 'GET' && body) method = 'POST';
+        const { token, headers, body } = opts;
+        const abortOnDestroy = opts.abortOnDestroy !== false;
+        let { method = 'GET' } = opts;
+        if (method === 'GET' && body) method = 'POST';
 
-    // 判断是否为弹弹play 或 Bangumi 官方 API，用于决定是否发送 X-User-Agent
-    const isDandanplayApi = url.includes('api.dandanplay.net') || url.includes('dandanplay');
-    const isBangumiApi = url.includes('api.bgm.tv') || url.includes('bgm.tv');
-    const shouldSendUserAgent = isDandanplayApi || isBangumiApi;
+        // 判断是否为弹弹play API，用于决定是否发送 X-User-Agent
+        const isDandanplayApi = url.includes('api.dandanplay.net') || url.includes('dandanplay');
+        const shouldSendUserAgent = isDandanplayApi;
 
-    const requestHeaders = {
-        'Accept-Encoding': 'gzip',
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-    };
-    // 只有弹弹play和Bangumi官方API才发送 X-User-Agent
-    if (shouldSendUserAgent) {
-        requestHeaders['X-User-Agent'] = userAgent;
-    }
+        const requestHeaders = {
+            'Accept-Encoding': 'gzip',
+            'Accept': 'application/json',
+        };
+        if (body) {
+            requestHeaders['Content-Type'] = 'application/json';
+        }
+        // Bangumi 官方 API 的 CORS 预检不允许 X-User-Agent，浏览器会发送原生 User-Agent。
+        if (shouldSendUserAgent) {
+            requestHeaders['X-User-Agent'] = userAgent;
+        }
 
-    if (token) requestHeaders.Authorization = `Bearer ${token}`;
-    if (headers) Object.assign(requestHeaders, headers);
+        if (token) requestHeaders.Authorization = `Bearer ${token}`;
+        if (headers) Object.assign(requestHeaders, headers);
 
-    const requestBody = body ? JSON.stringify(body) : null;
+        const requestBody = body ? JSON.stringify(body) : null;
 
-    // 统一生命周期管理：可中止的请求
-    const controller = new AbortController();
-    const timeoutMs = 30000;
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs); // 30s 超时
+        // 统一生命周期管理：可中止的请求
+        const controller = new AbortController();
+        const timeoutMs = 30000;
+        let timeoutFired = false;
+        const timeoutId = setTimeout(() => {
+            timeoutFired = true;
+            controller.abort();
+        }, timeoutMs); // 30s 超时
 
-    // 将控制器注册到全局集合，便于销毁时统一取消
-    if (window.ede?.abortControllers) {
-        window.ede.abortControllers.add(controller);
-    }
-
-    const startTime = performance.now(); // 网络请求开始时间（用于测量耗时）
-    try {
-        // 优先使用传入的 signal，否则使用内部创建的
-        const signal = opts.signal || controller.signal;
-
-        // 发起请求（fetch resolves when response headers are received）
-        const response = await fetch(url, {
-            method,
-            headers: requestHeaders,
-            body: requestBody,
-            signal: signal,
-        });
-
-        const ttfbMs = (performance.now() - startTime).toFixed(0); // time to first byte (近似: fetch resolve 时刻)
-
-        clearTimeout(timeoutId);
-
-        // 试图从 PerformanceResourceTiming 获取更细粒度的网络阶段耗时（若可用）
-        let perfTiming = null;
-        try {
-            // Performance entries 可能需要服务器返回 Timing-Allow-Origin 才能看到跨域详细信息
-            const entries = performance.getEntriesByName(url);
-            if (entries && entries.length > 0) {
-                // 取最近的一条同名记录
-                const entry = entries[entries.length - 1];
-                perfTiming = {
-                    name: entry.name,
-                    startTime: entry.startTime,
-                    fetchStart: entry.fetchStart,
-                    domainLookupTime: (entry.domainLookupEnd && entry.domainLookupStart) ? (entry.domainLookupEnd - entry.domainLookupStart) : null,
-                    connectTime: (entry.connectEnd && entry.connectStart) ? (entry.connectEnd - entry.connectStart) : null,
-                    secureConnectionTime: (entry.secureConnectionStart && entry.connectEnd) ? (entry.connectEnd - entry.secureConnectionStart) : null,
-                    requestStartToResponseStart: (entry.responseStart && entry.requestStart) ? (entry.responseStart - entry.requestStart) : null,
-                    responseDownloadTime: (entry.responseEnd && entry.responseStart) ? (entry.responseEnd - entry.responseStart) : null,
-                    totalTime: (entry.responseEnd && entry.startTime) ? (entry.responseEnd - entry.startTime) : null,
-                };
+        if (opts.signal) {
+            if (opts.signal.aborted) {
+                controller.abort();
             } else {
-                // 另一次尝试：按短名匹配（有些平台会在 URL 加上额外查询）
-                const all = performance.getEntries();
-                for (let i = all.length - 1; i >= 0; i--) {
-                    if (all[i].name && all[i].name.indexOf(url) !== -1) {
-                        const entry = all[i];
-                        perfTiming = {
-                            name: entry.name,
-                            startTime: entry.startTime,
-                            domainLookupTime: (entry.domainLookupEnd && entry.domainLookupStart) ? (entry.domainLookupEnd - entry.domainLookupStart) : null,
-                            connectTime: (entry.connectEnd && entry.connectStart) ? (entry.connectEnd - entry.connectStart) : null,
-                            secureConnectionTime: (entry.secureConnectionStart && entry.connectEnd) ? (entry.connectEnd - entry.secureConnectionStart) : null,
-                            requestStartToResponseStart: (entry.responseStart && entry.requestStart) ? (entry.responseStart - entry.requestStart) : null,
-                            responseDownloadTime: (entry.responseEnd && entry.responseStart) ? (entry.responseEnd - entry.responseStart) : null,
-                            totalTime: (entry.responseEnd && entry.startTime) ? (entry.responseEnd - entry.startTime) : null,
-                        };
-                        break;
+                opts.signal.addEventListener('abort', () => controller.abort(), { once: true });
+            }
+        }
+
+        // 将控制器注册到全局集合，便于销毁时统一取消
+        if (abortOnDestroy && window.ede?.abortControllers) {
+            window.ede.abortControllers.add(controller);
+        }
+
+        const startTime = performance.now(); // 网络请求开始时间（用于测量耗时）
+        try {
+            const signal = controller.signal;
+
+            // 发起请求（fetch resolves when response headers are received）
+            const response = await fetch(url, {
+                method,
+                headers: requestHeaders,
+                body: requestBody,
+                signal: signal,
+            });
+
+            const ttfbMs = (performance.now() - startTime).toFixed(0); // time to first byte (近似: fetch resolve 时刻)
+
+            clearTimeout(timeoutId);
+
+            // 试图从 PerformanceResourceTiming 获取更细粒度的网络阶段耗时（若可用）
+            let perfTiming = null;
+            try {
+                // Performance entries 可能需要服务器返回 Timing-Allow-Origin 才能看到跨域详细信息
+                const entries = performance.getEntriesByName(url);
+                if (entries && entries.length > 0) {
+                    // 取最近的一条同名记录
+                    const entry = entries[entries.length - 1];
+                    perfTiming = {
+                        name: entry.name,
+                        startTime: entry.startTime,
+                        fetchStart: entry.fetchStart,
+                        domainLookupTime: (entry.domainLookupEnd && entry.domainLookupStart) ? (entry.domainLookupEnd - entry.domainLookupStart) : null,
+                        connectTime: (entry.connectEnd && entry.connectStart) ? (entry.connectEnd - entry.connectStart) : null,
+                        secureConnectionTime: (entry.secureConnectionStart && entry.connectEnd) ? (entry.connectEnd - entry.secureConnectionStart) : null,
+                        requestStartToResponseStart: (entry.responseStart && entry.requestStart) ? (entry.responseStart - entry.requestStart) : null,
+                        responseDownloadTime: (entry.responseEnd && entry.responseStart) ? (entry.responseEnd - entry.responseStart) : null,
+                        totalTime: (entry.responseEnd && entry.startTime) ? (entry.responseEnd - entry.startTime) : null,
+                    };
+                } else {
+                    // 另一次尝试：按短名匹配（有些平台会在 URL 加上额外查询）
+                    const all = performance.getEntries();
+                    for (let i = all.length - 1; i >= 0; i--) {
+                        if (all[i].name && all[i].name.indexOf(url) !== -1) {
+                            const entry = all[i];
+                            perfTiming = {
+                                name: entry.name,
+                                startTime: entry.startTime,
+                                domainLookupTime: (entry.domainLookupEnd && entry.domainLookupStart) ? (entry.domainLookupEnd - entry.domainLookupStart) : null,
+                                connectTime: (entry.connectEnd && entry.connectStart) ? (entry.connectEnd - entry.connectStart) : null,
+                                secureConnectionTime: (entry.secureConnectionStart && entry.connectEnd) ? (entry.connectEnd - entry.secureConnectionStart) : null,
+                                requestStartToResponseStart: (entry.responseStart && entry.requestStart) ? (entry.responseStart - entry.requestStart) : null,
+                                responseDownloadTime: (entry.responseEnd && entry.responseStart) ? (entry.responseEnd - entry.responseStart) : null,
+                                totalTime: (entry.responseEnd && entry.startTime) ? (entry.responseEnd - entry.startTime) : null,
+                            };
+                            break;
+                        }
                     }
                 }
+            } catch (perfErr) {
+                // ignore perf errors
+                perfTiming = null;
             }
-        } catch (perfErr) {
-            // ignore perf errors
-            perfTiming = null;
-        }
 
-        // 读取 body（测量下载耗时）
-        const downloadStart = performance.now();
-        const responseText = await response.text();
-        const downloadMs = (performance.now() - downloadStart).toFixed(0);
-        const totalMs = (performance.now() - startTime).toFixed(0);
+            // 读取 body（测量下载耗时）
+            const downloadStart = performance.now();
+            const responseText = await response.text();
+            const downloadMs = (performance.now() - downloadStart).toFixed(0);
+            const totalMs = (performance.now() - startTime).toFixed(0);
 
-        // [优化] 从 URL 提取简短 API 路径名用于日志（不暴露完整 URL）
-        const apiPath = (() => { try { return new URL(url).pathname.split('/').slice(-2).join('/'); } catch(e) { return method; } })();
+            // [优化] 从 URL 提取简短 API 路径名用于日志（不暴露完整 URL）
+            const apiPath = (() => { try { return new URL(url).pathname.split('/').slice(-2).join('/'); } catch(e) { return method; } })();
 
-        // 统一日志输出（包含 PerformanceResourceTiming 的更精细数据，如果可用）
-        if (perfTiming) {
-            logger.debug(`[Network] ${apiPath} | status=${response.status} | ttfb=${ttfbMs}ms | download=${downloadMs}ms | total=${totalMs}ms`);
-        } else {
-            logger.debug(`[Network] ${apiPath} | status=${response.status} | ttfb=${ttfbMs}ms | download=${downloadMs}ms | total=${totalMs}ms`);
-        }
-
-        if (!response.ok) {
-            logger.warn(`[Network] ${apiPath} 错误响应 | status=${response.status} | total=${totalMs}ms`);
-            throw new Error(`HTTP error! Status: ${response.status}`);
-        }
-
-        if (responseText?.length > 0) {
-            try {
-                return JSON.parse(responseText);
-            } catch (parseError) {
-                logger.warn('responseText is not JSON:', parseError);
-            }
-        }
-        return { success: true };
-    } catch (error) {
-        clearTimeout(timeoutId);
-        const endTime = performance.now();
-        const duration = (endTime - startTime).toFixed(0);
-        const errPath = (() => { try { return new URL(url).pathname.split('/').slice(-2).join('/'); } catch(e) { return method; } })();
-
-        if (error.name === 'AbortError') {
-            // 区分是被组件销毁取消的(人为)，还是超时取消的
-            if (window.ede?.lastLoadId?.toString().startsWith('DESTROYED')) {
-                logger.debug(`[Network] ${errPath} 请求已因组件销毁而取消 | duration=${duration}ms`);
+            // 统一日志输出（包含 PerformanceResourceTiming 的更精细数据，如果可用）
+            if (perfTiming) {
+                logger.debug(`[Network] ${apiPath} | status=${response.status} | ttfb=${ttfbMs}ms | download=${downloadMs}ms | total=${totalMs}ms`);
             } else {
-                logger.warn(`[Network] ${errPath} 请求超时或被中断 | duration=${duration}ms`);
+                logger.debug(`[Network] ${apiPath} | status=${response.status} | ttfb=${ttfbMs}ms | download=${downloadMs}ms | total=${totalMs}ms`);
             }
-            throw error;
-        }
 
-        logger.error(`[Network] ${errPath} 异常 | duration=${duration}ms | error: ${error.message || error}`);
-        throw error;
-    } finally {
-        // 请求结束（无论成功失败），从集合中移除控制器
-        if (window.ede?.abortControllers) {
-            window.ede.abortControllers.delete(controller);
+            if (!response.ok) {
+                logger.warn(`[Network] ${apiPath} 错误响应 | status=${response.status} | total=${totalMs}ms`);
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+
+            if (responseText?.length > 0) {
+                try {
+                    return JSON.parse(responseText);
+                } catch (parseError) {
+                    logger.warn('responseText is not JSON:', parseError);
+                }
+            }
+            return { success: true };
+        } catch (error) {
+            clearTimeout(timeoutId);
+            const endTime = performance.now();
+            const duration = (endTime - startTime).toFixed(0);
+            const errPath = (() => { try { return new URL(url).pathname.split('/').slice(-2).join('/'); } catch(e) { return method; } })();
+
+            if (error.name === 'AbortError') {
+                // 区分是被组件销毁取消的(人为)，还是超时取消的
+                if (timeoutFired) {
+                    logger.warn(`[Network] ${errPath} 请求超时或被中断 | duration=${duration}ms`);
+                } else if (abortOnDestroy && window.ede?.lastLoadId?.toString().startsWith('DESTROYED')) {
+                    logger.debug(`[Network] ${errPath} 请求已因组件销毁而取消 | duration=${duration}ms`);
+                } else {
+                    logger.warn(`[Network] ${errPath} 请求被中断 | duration=${duration}ms`);
+                }
+                throw error;
+            }
+
+            logger.error(`[Network] ${errPath} 异常 | duration=${duration}ms | error: ${error.message || error}`);
+            throw error;
+        } finally {
+            // 请求结束（无论成功失败），从集合中移除控制器
+            if (abortOnDestroy && window.ede?.abortControllers) {
+                window.ede.abortControllers.delete(controller);
+            }
         }
     }
-}
 
     /**
      * 获取所有媒体库列表
@@ -2720,50 +2972,50 @@
 
                 // A. 尝试 /match 接口 (仅在启用时调用)
                 if (matchApiEnabled && matchPayload) {
-                const matchResult = await fetchMatchApi(matchPayload, config.prefix);
+                    const matchResult = await fetchMatchApi(matchPayload, config.prefix);
 
-                // [黑名单] 对官方 API 的 match 结果应用分集黑名单过滤
-                if (apiKey === 'official' && matchResult?.animes?.length > 0) {
-                    matchResult.animes = applyEpisodeBlacklist(matchResult.animes);
-                }
+                    // [黑名单] 对官方 API 的 match 结果应用分集黑名单过滤
+                    if (apiKey === 'official' && matchResult?.animes?.length > 0) {
+                        matchResult.animes = applyEpisodeBlacklist(matchResult.animes);
+                    }
 
-                // [改造6] A1. 精确匹配：isMatched: true 时做二次验证
-                if (matchResult?.isMatched && matchResult?.animes?.length > 0) {
-                    const match = matchResult.animes[0];
-                    // 二次验证：检查标题相似度是否合理
-                    const similarity = calculateStringSimilarity(
-                        normalizeTitle(animeName),
-                        normalizeTitle(match.animeTitle || '')
-                    );
-                    if (similarity >= 0.4) {
-                        result = { directMatch: true, apiPrefix: config.prefix, apiName: config.name, episodeInfo: { ...match, episodes: [{ episodeId: match.episodeId, episodeTitle: match.episodeTitle }], imageUrl: match.imageUrl } };
-                        logger.info(`[自动匹配] /match 精确命中，二次验证通过 (相似度: ${similarity.toFixed(2)})`);
-                    } else {
-                        // 相似度太低，降级为模糊匹配处理
-                        logger.warn(`[自动匹配] /match 声称精确匹配但标题不够像 ("${animeName}" vs "${match.animeTitle}", 相似度: ${similarity.toFixed(2)})，降级处理`);
+                    // [改造6] A1. 精确匹配：isMatched: true 时做二次验证
+                    if (matchResult?.isMatched && matchResult?.animes?.length > 0) {
+                        const match = matchResult.animes[0];
+                        // 二次验证：检查标题相似度是否合理
+                        const similarity = calculateStringSimilarity(
+                            normalizeTitle(animeName),
+                            normalizeTitle(match.animeTitle || '')
+                        );
+                        if (similarity >= 0.4) {
+                            result = { directMatch: true, apiPrefix: config.prefix, apiName: config.name, episodeInfo: { ...match, episodes: [{ episodeId: match.episodeId, episodeTitle: match.episodeTitle }], imageUrl: match.imageUrl } };
+                            logger.info(`[自动匹配] /match 精确命中，二次验证通过 (相似度: ${similarity.toFixed(2)})`);
+                        } else {
+                            // 相似度太低，降级为模糊匹配处理
+                            logger.warn(`[自动匹配] /match 声称精确匹配但标题不够像 ("${animeName}" vs "${match.animeTitle}", 相似度: ${similarity.toFixed(2)})，降级处理`);
+                            const bestMatch = selectBestMatch(animeName, matchResult.animes, null, 0.3);
+                            if (bestMatch) {
+                                result = { directMatch: true, apiPrefix: config.prefix, apiName: config.name, episodeInfo: { ...bestMatch, episodes: [{ episodeId: bestMatch.episodeId || bestMatch.matchedEpisodeId, episodeTitle: bestMatch.episodeTitle || bestMatch.matchedEpisodeTitle }], imageUrl: bestMatch.imageUrl } };
+                            }
+                        }
+                    }
+                    // A2. 模糊匹配：isMatched: false 时，用改造后的智能匹配
+                    else if (matchResult?.animes?.length > 0) {
                         const bestMatch = selectBestMatch(animeName, matchResult.animes, null, 0.3);
                         if (bestMatch) {
-                            result = { directMatch: true, apiPrefix: config.prefix, apiName: config.name, episodeInfo: { ...bestMatch, episodes: [{ episodeId: bestMatch.episodeId || bestMatch.matchedEpisodeId, episodeTitle: bestMatch.episodeTitle || bestMatch.matchedEpisodeTitle }], imageUrl: bestMatch.imageUrl } };
+                            // [修复] 季度守卫：如果搜索标题明确包含季度信息，但选出的最佳候选季度不匹配
+                            // 说明 /match 返回的候选中没有正确季度的条目，不应采纳，让 /search 路径兜底
+                            const parsedAnim = parseAnimeName(animeName);
+                            const bestParsed = parseCandidateTitle(bestMatch.animeTitle);
+                            const bestSeason = bestParsed.season || detectSeasonFromTitle(bestMatch.animeTitle, normalizeTitle(parsedAnim.title));
+                            if (parsedAnim.season && parsedAnim.season > 1 && bestSeason && bestSeason !== parsedAnim.season) {
+                                logger.warn(`[自动匹配] /match 模糊结果季度不匹配 (期望: S${String(parsedAnim.season).padStart(2,'0')}, 选中: "${bestMatch.animeTitle}" → S${String(bestSeason).padStart(2,'0')})，放弃 /match 结果，转 /search`);
+                                // 不设置 result，让流程 fall through 到 /search 路径
+                            } else {
+                                result = { directMatch: true, apiPrefix: config.prefix, apiName: config.name, episodeInfo: { ...bestMatch, episodes: [{ episodeId: bestMatch.episodeId || bestMatch.matchedEpisodeId, episodeTitle: bestMatch.episodeTitle || bestMatch.matchedEpisodeTitle }], imageUrl: bestMatch.imageUrl } };
+                            }
                         }
                     }
-                }
-                // A2. 模糊匹配：isMatched: false 时，用改造后的智能匹配
-                else if (matchResult?.animes?.length > 0) {
-                    const bestMatch = selectBestMatch(animeName, matchResult.animes, null, 0.3);
-                    if (bestMatch) {
-                        // [修复] 季度守卫：如果搜索标题明确包含季度信息，但选出的最佳候选季度不匹配
-                        // 说明 /match 返回的候选中没有正确季度的条目，不应采纳，让 /search 路径兜底
-                        const parsedAnim = parseAnimeName(animeName);
-                        const bestParsed = parseCandidateTitle(bestMatch.animeTitle);
-                        const bestSeason = bestParsed.season || detectSeasonFromTitle(bestMatch.animeTitle, normalizeTitle(parsedAnim.title));
-                        if (parsedAnim.season && parsedAnim.season > 1 && bestSeason && bestSeason !== parsedAnim.season) {
-                            logger.warn(`[自动匹配] /match 模糊结果季度不匹配 (期望: S${String(parsedAnim.season).padStart(2,'0')}, 选中: "${bestMatch.animeTitle}" → S${String(bestSeason).padStart(2,'0')})，放弃 /match 结果，转 /search`);
-                            // 不设置 result，让流程 fall through 到 /search 路径
-                        } else {
-                            result = { directMatch: true, apiPrefix: config.prefix, apiName: config.name, episodeInfo: { ...bestMatch, episodes: [{ episodeId: bestMatch.episodeId || bestMatch.matchedEpisodeId, episodeTitle: bestMatch.episodeTitle || bestMatch.matchedEpisodeTitle }], imageUrl: bestMatch.imageUrl } };
-                        }
-                    }
-                }
                 }
 
                 // B. 尝试 /search/episodes 接口 (如果 match 没有结果)
@@ -2924,16 +3176,19 @@
 
             let predictedEpisodeId = null;
             let direction = '';
+            let bgmIndexDelta = 0;
 
             // 播放下一集 (e.g., from ep1(index 0) to ep2(number 2))
             if (currentEpisodeNumber === previousEpisodeIndex + 2) {
                 predictedEpisodeId = previousEpisodeId + 1;
                 direction = '下一集';
+                bgmIndexDelta = 1;
             }
             // 播放上一集 (e.g., from ep2(index 1) to ep1(number 1))
             else if (currentEpisodeNumber === previousEpisodeIndex) {
                 predictedEpisodeId = previousEpisodeId - 1;
                 direction = '上一集';
+                bgmIndexDelta = -1;
             }
 
             if (predictedEpisodeId) {
@@ -2945,15 +3200,20 @@
                 const comments = await fetchComment(predictedEpisodeId, prevApiPrefix);
                 if (comments && comments.length > 0) {
                     logger.info(`[推理匹配] 成功！episodeId: ${predictedEpisodeId}，弹幕数: ${comments.length}，源: ${prevApiName || '默认'}`);
+                    const predictedEpisodeIndex = isNaN(currentEpisodeNumber) ? 0 : currentEpisodeNumber - 1;
+                    const predictedBgmEpisodeIndex = deriveBgmEpisodeIndex(previous_info, predictedEpisodeIndex, bgmIndexDelta);
                     const predictedEpisodeInfo = {
                         ...itemInfoMap,
                         episodeId: predictedEpisodeId,
                         episodeTitle: `第 ${currentEpisodeNumber} 集 (推断)`,
                         animeId: previous_info.animeId,
+                        bangumiId: previous_info.bangumiId || previous_info.animeId,
                         animeTitle: previous_info.animeTitle,
+                        animeOriginalTitle: previous_info.animeOriginalTitle || '',
                         imageUrl: previous_info.imageUrl,
                         seriesOrMovieId: seriesOrMovieId,
-                        episodeIndex: currentEpisodeNumber - 1,
+                        episodeIndex: predictedEpisodeIndex,
+                        bgmEpisodeIndex: predictedBgmEpisodeIndex,
                         // [修复] 携带源信息，确保后续 fetchComment 和下次推理都使用同一个源
                         apiPrefix: prevApiPrefix,
                         apiName: prevApiName,
@@ -2998,20 +3258,29 @@
         }
         // 处理来自 /match 的直接匹配结果
         if (res.directMatch) {
+            const episodeIndex = isNaN(episode) ? 0 : episode - 1;
+            const bgmEpisodeIndex = isValidEpisodeIndex(res.episodeInfo.bgmEpisodeIndex)
+                ? Number(res.episodeInfo.bgmEpisodeIndex)
+                : (
+                    isValidEpisodeIndex(res.episodeInfo.matchedEpisodeIndex)
+                        ? Number(res.episodeInfo.matchedEpisodeIndex)
+                        : episodeIndex
+                );
             const episodeInfo = {
                 episodeId: res.episodeInfo.episodeId,
                 episodeTitle: res.episodeInfo.episodeTitle,
                 // [修复] episodeIndex 必须用实际集数，否则推理匹配(上/下一集 episodeId±1)只在 EP1→EP2 时生效
-                episodeIndex: isNaN(episode) ? 0 : episode - 1,
+                episodeIndex,
+                bgmEpisodeIndex,
                 animeId: res.episodeInfo.animeId,
+                bangumiId: res.episodeInfo.bangumiId || res.episodeInfo.animeId,
                 animeTitle: res.episodeInfo.animeTitle,
                 animeOriginalTitle: '',
                 imageUrl: res.episodeInfo.imageUrl,
                 apiName: res.apiName,
                 apiPrefix: res.apiPrefix,
+                seriesOrMovieId: seriesOrMovieId,
             };
-        // 将系列ID也存入，用于下一集/上一集的判断
-        episodeInfo.seriesOrMovieId = seriesOrMovieId;
             // [增强日志] 完整输出 directMatch 最终结果，方便排查
             logger.info(`[匹配结果] directMatch: "${episodeInfo.animeTitle}" - "${episodeInfo.episodeTitle}" (episodeId: ${episodeInfo.episodeId}, animeId: ${episodeInfo.animeId})`);
             localStorage.setItem(unique_episode_key, JSON.stringify(episodeInfo));
@@ -3036,7 +3305,8 @@
             return null;
         }
         // [修复] 根据 episodeIndex 定位到正确的分集，而非永远取 episodes[0]
-        const selectedAnimeEpisodes = animaInfo.animes[selectAnime_id].episodes;
+        const selectedAnime = animaInfo.animes[selectAnime_id];
+        const selectedAnimeEpisodes = selectedAnime.episodes;
         let targetEpisode = selectedAnimeEpisodes[0]; // 默认回退到第一集
 
         if (episodeIndex >= 0 && episodeIndex < selectedAnimeEpisodes.length) {
@@ -3066,11 +3336,12 @@
             episodeId: targetEpisode.episodeId,
             episodeTitle: targetEpisode.episodeTitle,
             episodeIndex,
-            bgmEpisodeIndex: res.bgmEpisodeIndex ? res.bgmEpisodeIndex : episodeIndex,
-            animeId: animaInfo.animes[selectAnime_id].animeId,
-            animeTitle: animaInfo.animes[selectAnime_id].animeTitle,
+            bgmEpisodeIndex: isValidEpisodeIndex(res.bgmEpisodeIndex) ? Number(res.bgmEpisodeIndex) : episodeIndex,
+            animeId: selectedAnime.animeId,
+            bangumiId: selectedAnime.bangumiId || selectedAnime.animeId,
+            animeTitle: selectedAnime.animeTitle,
             animeOriginalTitle,
-            imageUrl: animaInfo.animes[selectAnime_id].imageUrl,
+            imageUrl: selectedAnime.imageUrl,
             seriesOrMovieId: seriesOrMovieId,
             apiPrefix: apiPrefix, // [修正] 保存API前缀
             apiName: apiName, // [新增] 保存API名称
@@ -3424,32 +3695,32 @@
 
     // [新增] 强制清理 UI 函数
     function clearDanmakuUI() {
-    // 1. 隐藏并清空现有弹幕
-    if (window.ede.danmaku) {
-        window.ede.danmaku.hide();
-        window.ede.danmaku.clear();
-    }
+        // 1. 隐藏并清空现有弹幕
+        if (window.ede.danmaku) {
+            window.ede.danmaku.hide();
+            window.ede.danmaku.clear();
+        }
 
-    // 2. [关键修改] 立即重置剧集元数据信息，防止旧标题残留
-    if (window.ede) {
-        window.ede.episode_info = null;
-    }
+        // 2. [关键修改] 立即重置剧集元数据信息，防止旧标题残留
+        if (window.ede) {
+            window.ede.episode_info = null;
+        }
 
-    // 3. 重置右下角 OSD 信息
-    const videoOsdDanmakuTitle = getById(eleIds.videoOsdDanmakuTitle);
-    if (videoOsdDanmakuTitle) {
-        videoOsdDanmakuTitle.innerText = '';
-    }
+        // 3. 重置右下角 OSD 信息
+        const videoOsdDanmakuTitle = getById(eleIds.videoOsdDanmakuTitle);
+        if (videoOsdDanmakuTitle) {
+            videoOsdDanmakuTitle.innerText = '';
+        }
 
-    // 4. 移除高能进度条
-    const chartEle = getById(eleIds.progressBarLineChart);
-    if (chartEle) {
-        chartEle.remove();
-    }
+        // 4. 移除高能进度条
+        const chartEle = getById(eleIds.progressBarLineChart);
+        if (chartEle) {
+            chartEle.remove();
+        }
 
-    // 5. 清空当前的弹幕数据缓存
-    window.ede.commentsParsed = [];
-}
+        // 5. 清空当前的弹幕数据缓存
+        window.ede.commentsParsed = [];
+    }
 
     async function loadDanmaku(loadType = LOAD_TYPE.CHECK) {
         const _media = document.querySelector(mediaQueryStr);
@@ -3542,34 +3813,34 @@
                 }
 
                 getCommentsByPluginApi(window.ede.itemId)
-                .then((comments) => {
-                    if (comments && comments.length > 0) {
-                        // [传证] 将 currentSessionId 传给 createDanmaku 进行核验
-                        return createDanmaku(comments, currentSessionId).then(() => {
-                            // 只有当全局 ID 依然匹配时，才做后续 UI 更新
-                            if (window.ede && window.ede.lastLoadId === currentSessionId) {
-                                logger.info('服务端Danmu插件弹幕加载就位');
-                                const danmakuCtrEle = getById(eleIds.danmakuCtr);
-                                if (danmakuCtrEle && danmakuCtrEle.style.opacity !== '1') {
-                                    danmakuCtrEle.style.opacity = '1';
+                    .then((comments) => {
+                        if (comments && comments.length > 0) {
+                            // [传证] 将 currentSessionId 传给 createDanmaku 进行核验
+                            return createDanmaku(comments, currentSessionId).then(() => {
+                                // 只有当全局 ID 依然匹配时，才做后续 UI 更新
+                                if (window.ede && window.ede.lastLoadId === currentSessionId) {
+                                    logger.info('服务端Danmu插件弹幕加载就位');
+                                    const danmakuCtrEle = getById(eleIds.danmakuCtr);
+                                    if (danmakuCtrEle && danmakuCtrEle.style.opacity !== '1') {
+                                        danmakuCtrEle.style.opacity = '1';
+                                    }
+                                    const videoOsdDanmakuTitle = getById(eleIds.videoOsdDanmakuTitle);
+                                    if (videoOsdDanmakuTitle && videoOsdDanmakuTitle.innerText.includes('未匹配')) {
+                                        videoOsdDanmakuTitle.innerText = `弹幕：${lsKeys.useFetchPluginXml.name} - ${comments.length}条`;
+                                    }
                                 }
-                                const videoOsdDanmakuTitle = getById(eleIds.videoOsdDanmakuTitle);
-                                if (videoOsdDanmakuTitle && videoOsdDanmakuTitle.innerText.includes('未匹配')) {
-                                    videoOsdDanmakuTitle.innerText = `弹幕：${lsKeys.useFetchPluginXml.name} - ${comments.length}条`;
-                                }
-                            }
-                        }).catch((error) => {
-                            logger.error(error);
-                            logger.error('使用服务端Danmu插件弹幕创建Danmaku实例时出错');
-                        });
-                    }
-                    throw new Error('从服务端Danmu插件获取弹幕失败，尝试在线加载...');
-                })
-                .catch((error) => {
-                    logger.error(error);
-                    // [传证] 将 ID 传给 loadOnlineDanmaku
-                    return loadOnlineDanmaku(loadType, currentSessionId);
-                });
+                            }).catch((error) => {
+                                logger.error(error);
+                                logger.error('使用服务端Danmu插件弹幕创建Danmaku实例时出错');
+                            });
+                        }
+                        throw new Error('从服务端Danmu插件获取弹幕失败，尝试在线加载...');
+                    })
+                    .catch((error) => {
+                        logger.error(error);
+                        // [传证] 将 ID 传给 loadOnlineDanmaku
+                        return loadOnlineDanmaku(loadType, currentSessionId);
+                    });
             });
         } else {
             // [传证] 将 ID 传给 loadOnlineDanmaku
@@ -3685,7 +3956,7 @@
         _comments = danmakuAntiOverlapFilter(_comments);
         return _comments;
     }
-   /**
+    /**
      * [新增] 获取统一的弹幕字体大小 (公共方法)
      * 逻辑提取自原 danmakuParser，供 parser 和 antiOverlapFilter 复用
      */
@@ -3723,141 +3994,141 @@
      */
     function danmakuAntiOverlapFilter(comments) {
 
-    if (!lsGetItem(lsKeys.antiOverlap.id)) {
-        return comments;
-    }
-
-    const beforeCount = comments.length;
-    if (beforeCount === 0) return comments;
-
-    // 获取配置参数
-    const heightPercent = lsGetItem(lsKeys.heightPercent.id);
-    const speedRate = lsGetItem(lsKeys.speed.id) / 100;
-
-    // 获取容器尺寸
-    const container = document.querySelector(mediaContainerQueryStr);
-    const containerHeight = container ? container.offsetHeight : (window.innerHeight || 720);
-    const containerWidth = container ? container.offsetWidth : (window.innerWidth || 1280);
-
-    // 使用公共函数获取字体大小
-    const fontSize = getDanmakuFontSize();
-
-    // 为滚动弹幕和固定弹幕使用不同的高度计算
-
-    // 滚动弹幕高度
-    const verticalPadding = 2;
-    const scrollDanmakuHeight = (fontSize * 1.3) + verticalPadding;
-
-    // 固定弹幕高度（顶部/底部需要更大的间距）
-    const fixedLineHeight = 1.4;  // 固定弹幕的行高系数
-    const fixedVerticalGap = Math.max(10, fontSize * 0.4);  // 固定弹幕的额外间距
-    const fixedDanmakuHeight = (fontSize * fixedLineHeight) + fixedVerticalGap;
-
-    // 计算实际可用高度和轨道数
-    const availableHeight = containerHeight * (heightPercent / 100);
-
-    // 为滚动弹幕和固定弹幕分别计算轨道数
-    const scrollMaxTracks = Math.max(1, Math.floor(availableHeight / scrollDanmakuHeight));
-    const fixedMaxTracks = Math.max(1, Math.floor(availableHeight / fixedDanmakuHeight));
-
-    // 顶部和底部弹幕轨道各占一部分
-    const topMaxTracks = Math.max(1, Math.floor(fixedMaxTracks / 3));
-    const bottomMaxTracks = Math.max(1, Math.floor(fixedMaxTracks / 4));
-
-    // 速度计算
-    const baseSpeed = 144;
-    const speed = baseSpeed * speedRate;
-    const duration = containerWidth / speed;
-    const screenDuration = duration;
-
-    // 估算文字宽度
-    const estimateWidth = (text) => {
-        let width = 0;
-        for (let i = 0; i < text.length; i++) {
-            width += (text.charCodeAt(i) > 127 ? 1 : 0.6);
+        if (!lsGetItem(lsKeys.antiOverlap.id)) {
+            return comments;
         }
-        return (width * fontSize) + 35;
-    };
 
-    const tracks = {
-        rtl: new Array(scrollMaxTracks).fill(null),
-        ltr: new Array(scrollMaxTracks).fill(null),
-        top: new Array(topMaxTracks).fill(null),
-        bottom: new Array(bottomMaxTracks).fill(null),
-    };
+        const beforeCount = comments.length;
+        if (beforeCount === 0) return comments;
 
-    // 按时间排序
-    const sortedComments = [...comments].sort((a, b) => a.time - b.time);
+        // 获取配置参数
+        const heightPercent = lsGetItem(lsKeys.heightPercent.id);
+        const speedRate = lsGetItem(lsKeys.speed.id) / 100;
 
-    const filteredComments = sortedComments.filter(curr => {
-        const mode = curr.mode || 'rtl';
-        const trackType = (mode === 'ltr') ? 'rtl' : mode;
-        const trackList = tracks[trackType] || tracks['rtl'];
+        // 获取容器尺寸
+        const container = document.querySelector(mediaContainerQueryStr);
+        const containerHeight = container ? container.offsetHeight : (window.innerHeight || 720);
+        const containerWidth = container ? container.offsetWidth : (window.innerWidth || 1280);
 
-        if (!trackList || trackList.length === 0) return true;
+        // 使用公共函数获取字体大小
+        const fontSize = getDanmakuFontSize();
 
-        const currWidth = estimateWidth(curr.text);
-        const currTime = curr.time;
+        // 为滚动弹幕和固定弹幕使用不同的高度计算
 
-        // 顶部/底部弹幕处理
-        if (mode === 'top' || mode === 'bottom') {
-            // 固定弹幕的显示时长
-            const displayDuration = 5;
-            const occupyTime = displayDuration;
+        // 滚动弹幕高度
+        const verticalPadding = 2;
+        const scrollDanmakuHeight = (fontSize * 1.3) + verticalPadding;
+
+        // 固定弹幕高度（顶部/底部需要更大的间距）
+        const fixedLineHeight = 1.4;  // 固定弹幕的行高系数
+        const fixedVerticalGap = Math.max(10, fontSize * 0.4);  // 固定弹幕的额外间距
+        const fixedDanmakuHeight = (fontSize * fixedLineHeight) + fixedVerticalGap;
+
+        // 计算实际可用高度和轨道数
+        const availableHeight = containerHeight * (heightPercent / 100);
+
+        // 为滚动弹幕和固定弹幕分别计算轨道数
+        const scrollMaxTracks = Math.max(1, Math.floor(availableHeight / scrollDanmakuHeight));
+        const fixedMaxTracks = Math.max(1, Math.floor(availableHeight / fixedDanmakuHeight));
+
+        // 顶部和底部弹幕轨道各占一部分
+        const topMaxTracks = Math.max(1, Math.floor(fixedMaxTracks / 3));
+        const bottomMaxTracks = Math.max(1, Math.floor(fixedMaxTracks / 4));
+
+        // 速度计算
+        const baseSpeed = 144;
+        const speed = baseSpeed * speedRate;
+        const duration = containerWidth / speed;
+        const screenDuration = duration;
+
+        // 估算文字宽度
+        const estimateWidth = (text) => {
+            let width = 0;
+            for (let i = 0; i < text.length; i++) {
+                width += (text.charCodeAt(i) > 127 ? 1 : 0.6);
+            }
+            return (width * fontSize) + 35;
+        };
+
+        const tracks = {
+            rtl: new Array(scrollMaxTracks).fill(null),
+            ltr: new Array(scrollMaxTracks).fill(null),
+            top: new Array(topMaxTracks).fill(null),
+            bottom: new Array(bottomMaxTracks).fill(null),
+        };
+
+        // 按时间排序
+        const sortedComments = [...comments].sort((a, b) => a.time - b.time);
+
+        const filteredComments = sortedComments.filter(curr => {
+            const mode = curr.mode || 'rtl';
+            const trackType = (mode === 'ltr') ? 'rtl' : mode;
+            const trackList = tracks[trackType] || tracks['rtl'];
+
+            if (!trackList || trackList.length === 0) return true;
+
+            const currWidth = estimateWidth(curr.text);
+            const currTime = curr.time;
+
+            // 顶部/底部弹幕处理
+            if (mode === 'top' || mode === 'bottom') {
+                // 固定弹幕的显示时长
+                const displayDuration = 5;
+                const occupyTime = displayDuration;
+
+                for (let i = 0; i < trackList.length; i++) {
+                    const last = trackList[i];
+
+                    if (!last || currTime >= last.time + occupyTime) {
+                        trackList[i] = { time: currTime, width: 0 };
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            // 滚动弹幕碰撞检测
+            const buffer = 0.5;
 
             for (let i = 0; i < trackList.length; i++) {
                 const last = trackList[i];
 
-                if (!last || currTime >= last.time + occupyTime) {
-                    trackList[i] = { time: currTime, width: 0 };
+                if (!last) {
+                    trackList[i] = { time: currTime, width: currWidth };
+                    return true;
+                }
+
+                // 进场追尾检测
+                const timeToFullyEnter = screenDuration * (last.width / (containerWidth + last.width));
+                const safeTimeEnter = last.time + timeToFullyEnter + buffer;
+
+                // 离场追尾检测
+                const timeToCatchUp = screenDuration * (currWidth / (containerWidth + currWidth));
+                const safeTimeExit = last.time + timeToCatchUp + buffer;
+
+                const safeTime = Math.max(safeTimeEnter, safeTimeExit);
+
+                if (currTime >= safeTime) {
+                    trackList[i] = { time: currTime, width: currWidth };
                     return true;
                 }
             }
-
             return false;
+        });
+
+        const afterCount = filteredComments.length;
+        const filteredCount = beforeCount - afterCount;
+        if (filteredCount > 0) {
+            logger.debug(`[防重叠] 容器: ${containerWidth}x${containerHeight}, 字体: ${fontSize}px`);
+            logger.debug(`  - 滚动弹幕高度: ${scrollDanmakuHeight.toFixed(1)}px, 轨道数: ${scrollMaxTracks}`);
+            logger.debug(`  - 固定弹幕高度: ${fixedDanmakuHeight.toFixed(1)}px (行高: ${fixedLineHeight}, 间距: ${fixedVerticalGap.toFixed(1)}px)`);
+            logger.debug(`  - 顶部轨道: ${topMaxTracks}, 底部轨道: ${bottomMaxTracks}`);
+            logger.debug(`  - 过滤: ${beforeCount} -> ${afterCount} (丢弃 ${filteredCount})`);
         }
 
-        // 滚动弹幕碰撞检测
-        const buffer = 0.5;
-
-        for (let i = 0; i < trackList.length; i++) {
-            const last = trackList[i];
-
-            if (!last) {
-                trackList[i] = { time: currTime, width: currWidth };
-                return true;
-            }
-
-            // 进场追尾检测
-            const timeToFullyEnter = screenDuration * (last.width / (containerWidth + last.width));
-            const safeTimeEnter = last.time + timeToFullyEnter + buffer;
-
-            // 离场追尾检测
-            const timeToCatchUp = screenDuration * (currWidth / (containerWidth + currWidth));
-            const safeTimeExit = last.time + timeToCatchUp + buffer;
-
-            const safeTime = Math.max(safeTimeEnter, safeTimeExit);
-
-            if (currTime >= safeTime) {
-                trackList[i] = { time: currTime, width: currWidth };
-                return true;
-            }
-        }
-        return false;
-    });
-
-    const afterCount = filteredComments.length;
-    const filteredCount = beforeCount - afterCount;
-    if (filteredCount > 0) {
-        logger.debug(`[防重叠] 容器: ${containerWidth}x${containerHeight}, 字体: ${fontSize}px`);
-        logger.debug(`  - 滚动弹幕高度: ${scrollDanmakuHeight.toFixed(1)}px, 轨道数: ${scrollMaxTracks}`);
-        logger.debug(`  - 固定弹幕高度: ${fixedDanmakuHeight.toFixed(1)}px (行高: ${fixedLineHeight}, 间距: ${fixedVerticalGap.toFixed(1)}px)`);
-        logger.debug(`  - 顶部轨道: ${topMaxTracks}, 底部轨道: ${bottomMaxTracks}`);
-        logger.debug(`  - 过滤: ${beforeCount} -> ${afterCount} (丢弃 ${filteredCount})`);
+        return filteredComments;
     }
-
-    return filteredComments;
-}
 
 
     function danmakuAutoFilter(comments) {
@@ -4135,8 +4406,8 @@
         const convertBottomTo = lsGetItem(lsKeys.convertBottomTo.id);
         let stat = { t2b: 0, t2r: 0, b2t: 0, b2r: 0 };
         // -------------------------------------
-       // const removeEmojiEnable = lsGetItem(lsKeys.removeEmojiEnable.id);
-       //const $xml = new DOMParser().parseFromString(string, 'text/xml')
+        // const removeEmojiEnable = lsGetItem(lsKeys.removeEmojiEnable.id);
+        //const $xml = new DOMParser().parseFromString(string, 'text/xml')
         const parsedComments = $obj
             .map(($comment) => {
                 const p = $comment.p;
@@ -4186,7 +4457,7 @@
                     cmt.originalText = cmt.text;
                     cmt.text += showSourceIds.map(id => id === showSource.source.id ? `,[${cmt[id]}]` : ',' + cmt[id]).join('');
                 }
-                 // if (removeEmojiEnable) {
+                // if (removeEmojiEnable) {
                 //     cmt.text = cmt.text.replace(emojiRegex, '');
                 // }
                 cmt.cuid = cmt[showSource.cid.id] + ',' + cmt[showSource.originalUserId.id];
@@ -4430,16 +4701,16 @@
 
         getById(eleIds.danmakuSwitchDiv, container).querySelector('div:first-child').prepend(
             embyButton({ id: eleIds.danmakuSwitch, label: '弹幕开关'
-                , iconKey: lsGetItem(lsKeys.switch.id) ? iconKeys.switch_on : iconKeys.switch_off
-                , style: (lsGetItem(lsKeys.switch.id) ? 'color:#52b54b;' : '') + 'font-size:1.5em;padding:0;' }
+                    , iconKey: lsGetItem(lsKeys.switch.id) ? iconKeys.switch_on : iconKeys.switch_off
+                    , style: (lsGetItem(lsKeys.switch.id) ? 'color:#52b54b;' : '') + 'font-size:1.5em;padding:0;' }
                 // , style: lsGetItem(lsKeys.switch.id) ? 'color:#52b54b;font-size:1.5em;padding:0;': 'font-size:1.5em;padding:0;'}
                 , doDanmakuSwitch)
         );
         // 防重叠按钮
         getById(eleIds.antiOverlapDiv, container).prepend(
             embyButton({ id: eleIds.antiOverlapBtn, label: '防重叠开关'
-                , iconKey: lsGetItem(lsKeys.antiOverlap.id) ? iconKeys.switch_on : iconKeys.switch_off
-                , style: (lsGetItem(lsKeys.antiOverlap.id) ? 'color:#52b54b;' : '') + 'font-size:1.5em;padding:0;' }
+                    , iconKey: lsGetItem(lsKeys.antiOverlap.id) ? iconKeys.switch_on : iconKeys.switch_off
+                    , style: (lsGetItem(lsKeys.antiOverlap.id) ? 'color:#52b54b;' : '') + 'font-size:1.5em;padding:0;' }
                 , doAntiOverlapSwitch)
         );
         // 滑块
@@ -4454,7 +4725,7 @@
         );
         getById(eleIds.danmakuOpacityDiv, container).append(
             embySlider({ lsKey: lsKeys.fontOpacity }, onSliderChange, onSliderChangeLabel
-        )
+            )
         );
         getById(eleIds.danmakuSpeedDiv, container).append(
             embySlider({ lsKey: lsKeys.speed }, onSliderChange, onSliderChangeLabel)
@@ -4526,21 +4797,21 @@
         var styleDiv = getById(eleIds.danmakuFontStyleDiv);
         styleDiv.append(
             embySlider({ lsKey: lsKeys.fontStyle }
-            , (val, opts) => {
-                onSliderChange(val, opts); // 保存
-                onSliderChangeLabel(styles.fontStyles[val].name, opts);
-            }
-            , (val, opts) => {
-                onSliderChangeLabel(styles.fontStyles[val].name, opts);
-            })
+                , (val, opts) => {
+                    onSliderChange(val, opts); // 保存
+                    onSliderChangeLabel(styles.fontStyles[val].name, opts);
+                }
+                , (val, opts) => {
+                    onSliderChangeLabel(styles.fontStyles[val].name, opts);
+                })
         );
         // 使用 || 0 确保如果是空值或0，也能正确识别为第0项
         var savedStyleIdx = parseInt(lsGetItem(lsKeys.fontStyle.id)) || 0;
         var styleName = (styles.fontStyles[savedStyleIdx] || styles.fontStyles[0]).name;
 
         if (styleDiv.nextElementSibling) {
-             var label = styleDiv.nextElementSibling.querySelector('label');
-             if (label) label.innerText = styleName;
+            var label = styleDiv.nextElementSibling.querySelector('label');
+            if (label) label.innerText = styleName;
         }
 
         buildFontFamilySetting();
@@ -4621,7 +4892,7 @@
         );
         fontFamilyDiv.append(
             embyInput({ id: eleIds.fontFamilyInput, value: lsGetItem(lsKeys.fontFamily.id)
-                , type: 'search', style: 'display: none;' }
+                    , type: 'search', style: 'display: none;' }
                 , (e) => {
                     const inputVal = getTargetInput(e).value.trim();
                     if (!inputVal) { return; }
@@ -4660,12 +4931,12 @@
     }
 
     function changeFontStylePreview() {
-    const fontStylePreview = getById(eleIds.fontStylePreview);
-    if (!fontStylePreview) return; // 增加判空
-    const fontWeight = lsGetItem(lsKeys.fontWeight.id);
-    const fontStyleIdx = lsGetItem(lsKeys.fontStyle.id);
-    const fontStyleObj = styles.fontStyles[fontStyleIdx] || styles.fontStyles[0];
-    const fontStyle = fontStyleObj.id;
+        const fontStylePreview = getById(eleIds.fontStylePreview);
+        if (!fontStylePreview) return; // 增加判空
+        const fontWeight = lsGetItem(lsKeys.fontWeight.id);
+        const fontStyleIdx = lsGetItem(lsKeys.fontStyle.id);
+        const fontStyleObj = styles.fontStyles[fontStyleIdx] || styles.fontStyles[0];
+        const fontStyle = fontStyleObj.id;
 
         const fontFamily = lsGetItem(lsKeys.fontFamily.id);
         const fontOpacity = Math.round(lsGetItem(lsKeys.fontOpacity.id) / 100 * 255).toString(16).padStart(2, '0');
@@ -5156,7 +5427,7 @@
                         <div class="${classes.embyFieldDesc}">${animeTitle}</div>
                     </div>
                     ${!episodeTitle ? '' :
-                    `<div>
+            `<div>
                         <label class="${classes.embyLabel}">章节名: </label>
                         <div class="${classes.embyFieldDesc}">${episodeTitle}</div>
                     </div>`}
@@ -5236,9 +5507,9 @@
         let danmuListTabOpts = danmuListOpts;
         if (danmuListExts.length > 0) {
             const dandanplayListOpt = { id: 'dandanplay', name: '弹弹 play', onChange: () => {
-                const comments = window.ede.danmuCache[episodeId];
-                return comments ? danmakuParser(comments) : [];
-            } };
+                    const comments = window.ede.danmuCache[episodeId];
+                    return comments ? danmakuParser(comments) : [];
+                } };
             danmuListTabOpts = danmuListTabOpts.concat(dandanplayListOpt).concat(danmuListExts);
         }
         getById(eleIds.danmuListDiv, container).append(
@@ -5280,10 +5551,19 @@
                     renderBangumiCharacters(charactersDiv, characters);
                 });
                 function renderBangumiCharacters(container, characters) {
+                    // 图片域名替换：将默认 lain.bgm.tv 替换为用户自定义域名
+                    const replaceBgmImageDomain = (url) => {
+                        if (!url) return url;
+                        const customDomain = bangumiApi.imageDomain;
+                        if (customDomain && customDomain !== 'https://lain.bgm.tv') {
+                            return url.replace('https://lain.bgm.tv', customDomain);
+                        }
+                        return url;
+                    };
                     characters.map(c => {
                         const characterDiv = document.createElement('div');
                         characterDiv.style = 'width: 31%; display: flex; margin: .5em;';
-                        let embyImgButtonInner = embyImg(c.images.large, 'object-position: top;');
+                        let embyImgButtonInner = embyImg(replaceBgmImageDomain(c.images.large), 'object-position: top;');
                         if (!c.images.large) {
                             embyImgButtonInner = embyI(iconKeys.person, classes.cardImageIcon);
                         }
@@ -5296,7 +5576,7 @@
                         const characterCvDiv = document.createElement('div');
                         characterCvDiv.textContent = 'CV: ' + c.actors.map(a => a.name).join();
                         if (c.actors[0]) {
-                            characterCvDiv.append(embyImgButton(embyImg(c.actors[0].images.large)));
+                            characterCvDiv.append(embyImgButton(embyImg(replaceBgmImageDomain(c.actors[0].images.large))));
                         }
                         characterRightDiv.append(characterCvDiv);
                         characterDiv.append(characterRightDiv);
@@ -5449,6 +5729,13 @@
                                 同步的媒体信息为自动匹配而来,可在"弹幕信息"中查看;
                                 自动匹配有误可"手动匹配",仍无法匹配可点击按钮X"取消匹配/清除弹幕",则此单章节不会同步;
                             </div>
+                            <label class="${classes.embyLabel}">Bangumi API 地址: </label>
+                            <div id="${eleIds.bangumiApiPrefixInputDiv}" style="display: flex; margin-bottom: 0.5em;"></div>
+                            <label class="${classes.embyLabel}">Bangumi 图片域名: </label>
+                            <div id="${eleIds.bangumiImageDomainInputDiv}" style="display: flex; margin-bottom: 0.5em;"></div>
+                            <div class="${classes.embyFieldDesc}">
+                                自定义 Bangumi API 和图片域名，用于镜像/代理场景，留空则使用默认值
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -5516,27 +5803,27 @@
         `;
         container.innerHTML = template.trim();
         const topOpts = [
-        { id: 'default', name: '默认' },
-        { id: 'bottom', name: '底部' },
-        { id: 'rolling', name: '滚动' }
-    ];
-    getById('danmakuConvertTopToDiv', container).append(
-        embyTabs(topOpts, lsGetItem(lsKeys.convertTopTo.id), 'id', 'name', (val) => {
-            lsSetItem(lsKeys.convertTopTo.id, val.id);
-            loadDanmaku(LOAD_TYPE.RELOAD);
-        })
-    );
-    const bottomOpts = [
-        { id: 'default', name: '默认' },
-        { id: 'top', name: '顶部' },
-        { id: 'rolling', name: '滚动' }
-    ];
-    getById('danmakuConvertBottomToDiv', container).append(
-        embyTabs(bottomOpts, lsGetItem(lsKeys.convertBottomTo.id), 'id', 'name', (val) => {
-            lsSetItem(lsKeys.convertBottomTo.id, val.id);
-            loadDanmaku(LOAD_TYPE.RELOAD);
-        })
-    );
+            { id: 'default', name: '默认' },
+            { id: 'bottom', name: '底部' },
+            { id: 'rolling', name: '滚动' }
+        ];
+        getById('danmakuConvertTopToDiv', container).append(
+            embyTabs(topOpts, lsGetItem(lsKeys.convertTopTo.id), 'id', 'name', (val) => {
+                lsSetItem(lsKeys.convertTopTo.id, val.id);
+                loadDanmaku(LOAD_TYPE.RELOAD);
+            })
+        );
+        const bottomOpts = [
+            { id: 'default', name: '默认' },
+            { id: 'top', name: '顶部' },
+            { id: 'rolling', name: '滚动' }
+        ];
+        getById('danmakuConvertBottomToDiv', container).append(
+            embyTabs(bottomOpts, lsGetItem(lsKeys.convertBottomTo.id), 'id', 'name', (val) => {
+                lsSetItem(lsKeys.convertBottomTo.id, val.id);
+                loadDanmaku(LOAD_TYPE.RELOAD);
+            })
+        );
         buildDanmakuFilterSetting(container);
         buildExtSetting(container);
         buildAutoMatchSetting(container);
@@ -5571,11 +5858,11 @@
         // 合并相似弹幕
         getById(eleIds.danmakuFilterProDiv, container).append(
             embyCheckbox({ label: labels.enable }, lsGetItem(lsKeys.mergeSimilarEnable.id)
-            , (checked) => {
-                lsSetItem(lsKeys.mergeSimilarEnable.id, checked);
-                loadDanmaku(LOAD_TYPE.RELOAD);
-            }
-        ));
+                , (checked) => {
+                    lsSetItem(lsKeys.mergeSimilarEnable.id, checked);
+                    loadDanmaku(LOAD_TYPE.RELOAD);
+                }
+            ));
         getById(eleIds.mergeSimilarPercentDiv).append(
             embySlider({ lsKey: lsKeys.mergeSimilarPercent }, onSliderChange, onSliderChangeLabel)
         );
@@ -5852,6 +6139,22 @@
         ));
         const bangumiTokenLinkDiv = getById(eleIds.bangumiTokenLinkDiv, container);
         bangumiTokenLinkDiv.append(embyALink(bangumiApi.accessTokenUrl, bangumiApi.accessTokenUrl));
+        // Bangumi API 地址输入框
+        const bangumiApiPrefixInputDiv = getById(eleIds.bangumiApiPrefixInputDiv, container);
+        if (bangumiApiPrefixInputDiv) {
+            bangumiApiPrefixInputDiv.append(embyInput(
+                { id: 'bangumiApiPrefixInput', value: lsGetItem(lsKeys.bangumiApiPrefix.id) },
+                (e) => { lsSetItem(lsKeys.bangumiApiPrefix.id, getById('bangumiApiPrefixInput').value.trim()); }
+            ));
+        }
+        // Bangumi 图片域名输入框
+        const bangumiImageDomainInputDiv = getById(eleIds.bangumiImageDomainInputDiv, container);
+        if (bangumiImageDomainInputDiv) {
+            bangumiImageDomainInputDiv.append(embyInput(
+                { id: 'bangumiImageDomainInput', value: lsGetItem(lsKeys.bangumiImageDomain.id) },
+                (e) => { lsSetItem(lsKeys.bangumiImageDomain.id, getById('bangumiImageDomainInput').value.trim()); }
+            ));
+        }
     }
 
     function onEnterBangumiToken(e) {
@@ -5864,13 +6167,13 @@
         }).catch(error => {
             label.innerText = 'Bangumi Token 验证失败';
             label.style.color = 'red';
-            throw error;
+            logger.error('Bangumi Token 校验按钮处理失败', error);
         });
     }
 
-    async function fetchBangumiApiGetMe(bangumiToken) {
+    async function fetchBangumiApiGetMe(bangumiToken, fetchOpts = {}) {
         try {
-            const res = await fetchJson(bangumiApi.getMe(), { token: bangumiToken });
+            const res = await fetchJson(bangumiApi.getMe(), { ...fetchOpts, token: bangumiToken });
             logger.debug('Bangumi Token 验证成功', res);
             localStorage.setItem(lsLocalKeys.bangumiMe, JSON.stringify(res));
             return res;
@@ -6456,7 +6759,7 @@
     function buildExcludedLibrariesSetting(container) {
         const excludedDiv = getById(eleIds.excludedLibrariesDiv, container);
         if (!excludedDiv) return;
-         // 初始模板 - 显示加载中
+        // 初始模板 - 显示加载中
         excludedDiv.innerHTML = `
             <div class="${classes.embyFieldDesc}" style="margin-bottom: 0.5em;">
                 勾选不需要加载弹幕的媒体库：
@@ -6707,10 +7010,10 @@
     function escapeHtml(str) {
         if (!str) return '';
         return str.replace(/&/g, '&amp;')
-                  .replace(/</g, '&lt;')
-                  .replace(/>/g, '&gt;')
-                  .replace(/"/g, '&quot;')
-                  .replace(/'/g, '&#039;');
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 
     function buildCustomUrlSetting(container) {
@@ -6720,21 +7023,21 @@
             <div class="${classes.embyFieldDesc}">${obj.msg2 ? obj.msg2 : ''}</div>
         `;
         customeUrl.mapping.map(obj => { getById(eleIds.customeUrlsDiv, container).innerHTML += getTemplate(obj); return obj; })
-        .map(obj => {
-            const inputDiv = getById(obj.divId, container);
-            const onEnter = (e) => {
-                const target = getTargetInput(e);
-                let value = target.value.trim();
-                if (!value) {
-                    value = obj.lsKey.defaultValue;
-                    target.value = value;
-                }
-                lsSetItem(obj.lsKey.id, value);
-                obj.rewrite(value);
-            };
-            inputDiv.append(embyInput({ type: 'search', value: lsGetItem(obj.lsKey.id) }, onEnter));
-            inputDiv.append(embyButton({ label: '确认', iconKey: iconKeys.check }, onEnter));
-        });
+            .map(obj => {
+                const inputDiv = getById(obj.divId, container);
+                const onEnter = (e) => {
+                    const target = getTargetInput(e);
+                    let value = target.value.trim();
+                    if (!value) {
+                        value = obj.lsKey.defaultValue;
+                        target.value = value;
+                    }
+                    lsSetItem(obj.lsKey.id, value);
+                    obj.rewrite(value);
+                };
+                inputDiv.append(embyInput({ type: 'search', value: lsGetItem(obj.lsKey.id) }, onEnter));
+                inputDiv.append(embyButton({ label: '确认', iconKey: iconKeys.check }, onEnter));
+            });
     }
 
     function buildAbout(containerId) {
@@ -7294,21 +7597,13 @@
         const animeSelect = embySelect({ id: eleIds.danmakuAnimeSelect, label: '剧集: ', style: 'width: auto;max-width: 100%;' }
             , selectAnimeIdx, allAnimes, 'animeId', opt => `${opt.animeTitle} 类型：${opt.typeDescription} 来源：${opt.apiName}`, doDanmakuAnimeSelect);
         danmakuAnimeDiv.append(animeSelect);
-        // [修改] 只有当选中的动画有 episodes 时才显示集数选择器
-        const selectedAnime = allAnimes[selectAnimeIdx];
-        if (selectedAnime.episodes && selectedAnime.episodes.length > 0) {
-            const episodeNumSelect = embySelect({ id: eleIds.danmakuEpisodeNumSelect, label: '集数: ', style: 'width: auto;max-width: 100%;' }
-                , window.ede.searchDanmakuOpts.episode, selectedAnime.episodes, 'episodeId', (opt, i) => `${i + 1} - ${opt.episodeTitle}`);
-            danmakuEpisodeNumDiv.append(episodeNumSelect);
-        } else {
-            danmakuEpisodeNumDiv.innerHTML = '<span style="color: #52b54b;">请选择动画以加载分集信息</span>';
-        }
 
         getById(eleIds.danmakuEpisodeFlag).hidden = false;
         getById(eleIds.danmakuSwitchEpisode).disabled = false;
-        getById(eleIds.searchImg).src = selectedAnime.imageUrl || dandanplayApi.posterImg(selectedAnime.animeId);
-        const apiSourceDiv = getById(eleIds.searchApiSource);
-        if (apiSourceDiv) apiSourceDiv.innerText = `来源: ${selectedAnime.apiName}`;
+
+        // [修复] 初始渲染后直接调用 doDanmakuAnimeSelect 走统一的分集加载逻辑，
+        // 避免静态检查 episodes 导致分集列表为空（初始选中项不触发 onChange）
+        doDanmakuAnimeSelect(null, selectAnimeIdx, allAnimes[selectAnimeIdx]);
     }
 
     function doSearchTitleSwtich(e) {
@@ -7348,9 +7643,12 @@
         const numDiv = getById(eleIds.danmakuEpisodeNumDiv);
         numDiv.innerHTML = '';
         const anime = window.ede.searchDanmakuOpts.animes[index];
+        if (!anime) return;
 
-        // [新增] 如果该动画还没有分集信息，先获取
-        if (!anime.episodes && anime.bangumiId) {
+        // [修复] 条件修正：episodes 不存在或为空数组时都需要拉取分集
+        // 原条件 `!anime.episodes` 会导致空数组 [] 跳过获取
+        const needFetch = (!anime.episodes || anime.episodes.length === 0) && anime.bangumiId;
+        if (needFetch) {
             logger.debug(`[手动匹配] 动画 ${anime.animeTitle} 缺少分集信息，正在获取...`);
             numDiv.innerHTML = '<span style="color: #52b54b;">正在加载分集信息...</span>';
 
@@ -7359,14 +7657,16 @@
 
             try {
                 const bangumiResult = await fetchJson(bangumiUrl);
-                if (bangumiResult && bangumiResult.bangumi && bangumiResult.bangumi.episodes) {
-                    // 更新动画对象，添加分集信息
-                    anime.episodes = bangumiResult.bangumi.episodes;
-                    anime.seasons = bangumiResult.bangumi.seasons;
+                // [修复] 兼容多种返回格式：{ bangumi: { episodes } } 或 { episodes }
+                const eps = bangumiResult?.bangumi?.episodes || bangumiResult?.episodes;
+                const seas = bangumiResult?.bangumi?.seasons || bangumiResult?.seasons;
+                if (eps && eps.length > 0) {
+                    anime.episodes = eps;
+                    anime.seasons = seas;
                     logger.info(`[手动匹配] 获取分集信息成功: ${anime.animeTitle}, 共 ${anime.episodes.length} 集`);
                 } else {
-                    logger.error(`[手动匹配] 获取分集信息失败: 返回数据格式错误`);
-                    numDiv.innerHTML = '<span style="color: #e23636;">获取分集信息失败</span>';
+                    logger.error(`[手动匹配] 获取分集信息失败: 返回数据为空或格式错误`);
+                    numDiv.innerHTML = '<span style="color: #e23636;">获取分集信息失败（返回为空）</span>';
                     return;
                 }
             } catch (error) {
@@ -7402,13 +7702,18 @@
             }
         }
 
-        // 切换剧集时，默认选中第一个分集
-        const episodeNumSelect = embySelect({ id: eleIds.danmakuEpisodeNumSelect, label: '集数: ' }, 0, displayEpisodes, 'episodeId', (opt, i) => `${i + 1} - ${opt.episodeTitle}`);
-        episodeNumSelect.style.maxWidth = '100%';
-        numDiv.append(episodeNumSelect);
-
-        // [黑名单] 存储过滤后的分集列表，供 doDanmakuSwitchEpisode 使用
-        anime.filteredEpisodes = displayEpisodes;
+        // [修复] 分集列表为空时给出明确提示，而不是渲染空下拉框
+        if (displayEpisodes.length === 0) {
+            numDiv.innerHTML = '<span style="color: #aaa;">该条目暂无分集信息</span>';
+            anime.filteredEpisodes = [];
+        } else {
+            // 切换剧集时，默认选中第一个分集
+            const episodeNumSelect = embySelect({ id: eleIds.danmakuEpisodeNumSelect, label: '集数: ' }, 0, displayEpisodes, 'episodeId', (opt, i) => `${i + 1} - ${opt.episodeTitle}`);
+            episodeNumSelect.style.maxWidth = '100%';
+            numDiv.append(episodeNumSelect);
+            // [黑名单] 存储过滤后的分集列表，供 doDanmakuSwitchEpisode 使用
+            anime.filteredEpisodes = displayEpisodes;
+        }
 
         // [修正] 始终使用匹配到的海报
         getById(eleIds.searchImg).src = anime.imageUrl || dandanplayApi.posterImg(anime.animeId);
@@ -7429,13 +7734,14 @@
             episodeId: episodeNumSelect.value,
             episodeTitle: episodeNumSelect.options[episodeNumSelect.selectedIndex].text,
             episodeIndex: episodeNumSelect.selectedIndex,
-            bgmEpisodeIndex: episodeNumSelect.selectedIndex, 
+            bgmEpisodeIndex: episodeNumSelect.selectedIndex,
             animeId: anime.animeId,
+            bangumiId: anime.bangumiId || anime.animeId,
             animeTitle: anime.animeTitle,
-            animeOriginalTitle: '', 
+            animeOriginalTitle: '',
             imageUrl: anime.imageUrl,
-            apiPrefix: anime.apiPrefix, 
-            apiName: anime.apiName, 
+            apiPrefix: anime.apiPrefix,
+            apiName: anime.apiName,
             seriesOrMovieId: seriesOrMovieId,
         };
 
@@ -7511,86 +7817,86 @@
     }
 
     function doDanmuListOptsChange(value, index) {
-    const container = getById(eleIds.danmuListText);
-    const phantom = getById('danmuListPhantom');
-    const content = getById('danmuListContent');
+        const container = getById(eleIds.danmuListText);
+        const phantom = getById('danmuListPhantom');
+        const content = getById('danmuListContent');
 
-    // 1. 清理旧事件
-    if (container._scrollHandler) {
-        container.removeEventListener('scroll', container._scrollHandler);
-    }
-
-    // 2. 处理“不展示”
-    if (index == lsKeys.danmuList.defaultValue) {
-        container.style.display = 'none';
-        return;
-    }
-    container.style.display = 'block';
-
-    // 3. 获取数据
-    const list = value.onChange(window.ede);
-    if (!list || list.length === 0) {
-        content.innerHTML = '无数据';
-        phantom.style.height = '0px';
-        return;
-    }
-
-    // --- 配置项 ---
-    const ITEM_HEIGHT = 28; // 单行高度(px)，根据字号微调
-    const TOTAL_COUNT = list.length;
-    const CONTAINER_HEIGHT = container.clientHeight || 350;
-
-    // 设置幽灵高度，撑开滚动条
-    phantom.style.height = `${TOTAL_COUNT * ITEM_HEIGHT}px`;
-
-    // 辅助函数：时间格式化 mm:ss
-    const formatTime = (seconds) => {
-        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-        const s = Math.floor(seconds % 60).toString().padStart(2, '0');
-        return `${m}:${s}`;
-    };
-
-    // 核心渲染函数
-    const render = () => {
-        const scrollTop = container.scrollTop;
-
-        // 计算渲染范围 (缓冲区加大一点，防止快速滚动白屏)
-        const BUFFER = 10;
-        let startIndex = Math.floor(scrollTop / ITEM_HEIGHT) - BUFFER;
-        let endIndex = Math.ceil((scrollTop + CONTAINER_HEIGHT) / ITEM_HEIGHT) + BUFFER;
-
-        if (startIndex < 0) startIndex = 0;
-        if (endIndex > TOTAL_COUNT) endIndex = TOTAL_COUNT;
-
-        let html = '';
-        const hasShowSourceIds = lsGetItem(lsKeys.showSource.id).length > 0;
-
-        for (let i = startIndex; i < endIndex; i++) {
-            const c = list[i];
-            const textContent =
-                `[${i + 1}][${formatTime(c.time)}] : `
-                + (hasShowSourceIds ? c.originalText : c.text)
-                + (c.source ? ` [${c.source}]` : '')
-                + (c.originalUserId ? `[${c.originalUserId}]` : '')
-                + (c.cid ? `[${c.cid}]` : '')
-                + `[${c.mode}]`;
-
-            // 使用 div 包裹纯文本，单行显示
-            html += `<div style="height:${ITEM_HEIGHT}px; line-height:${ITEM_HEIGHT}px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${textContent.replace(/</g, '&lt;')}</div>`;
+        // 1. 清理旧事件
+        if (container._scrollHandler) {
+            container.removeEventListener('scroll', container._scrollHandler);
         }
 
-        content.innerHTML = html;
-        // 关键：偏移 content 位置，让它永远处于可视区域
-        content.style.transform = `translateY(${startIndex * ITEM_HEIGHT}px)`;
-    };
+        // 2. 处理“不展示”
+        if (index == lsKeys.danmuList.defaultValue) {
+            container.style.display = 'none';
+            return;
+        }
+        container.style.display = 'block';
 
-    // 首次渲染
-    render();
+        // 3. 获取数据
+        const list = value.onChange(window.ede);
+        if (!list || list.length === 0) {
+            content.innerHTML = '无数据';
+            phantom.style.height = '0px';
+            return;
+        }
 
-    // 绑定滚动事件 (使用 rAF 保证丝滑)
-    container._scrollHandler = () => window.requestAnimationFrame(render);
-    container.addEventListener('scroll', container._scrollHandler);
-}
+        // --- 配置项 ---
+        const ITEM_HEIGHT = 28; // 单行高度(px)，根据字号微调
+        const TOTAL_COUNT = list.length;
+        const CONTAINER_HEIGHT = container.clientHeight || 350;
+
+        // 设置幽灵高度，撑开滚动条
+        phantom.style.height = `${TOTAL_COUNT * ITEM_HEIGHT}px`;
+
+        // 辅助函数：时间格式化 mm:ss
+        const formatTime = (seconds) => {
+            const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        };
+
+        // 核心渲染函数
+        const render = () => {
+            const scrollTop = container.scrollTop;
+
+            // 计算渲染范围 (缓冲区加大一点，防止快速滚动白屏)
+            const BUFFER = 10;
+            let startIndex = Math.floor(scrollTop / ITEM_HEIGHT) - BUFFER;
+            let endIndex = Math.ceil((scrollTop + CONTAINER_HEIGHT) / ITEM_HEIGHT) + BUFFER;
+
+            if (startIndex < 0) startIndex = 0;
+            if (endIndex > TOTAL_COUNT) endIndex = TOTAL_COUNT;
+
+            let html = '';
+            const hasShowSourceIds = lsGetItem(lsKeys.showSource.id).length > 0;
+
+            for (let i = startIndex; i < endIndex; i++) {
+                const c = list[i];
+                const textContent =
+                    `[${i + 1}][${formatTime(c.time)}] : `
+                    + (hasShowSourceIds ? c.originalText : c.text)
+                    + (c.source ? ` [${c.source}]` : '')
+                    + (c.originalUserId ? `[${c.originalUserId}]` : '')
+                    + (c.cid ? `[${c.cid}]` : '')
+                    + `[${c.mode}]`;
+
+                // 使用 div 包裹纯文本，单行显示
+                html += `<div style="height:${ITEM_HEIGHT}px; line-height:${ITEM_HEIGHT}px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${textContent.replace(/</g, '&lt;')}</div>`;
+            }
+
+            content.innerHTML = html;
+            // 关键：偏移 content 位置，让它永远处于可视区域
+            content.style.transform = `translateY(${startIndex * ITEM_HEIGHT}px)`;
+        };
+
+        // 首次渲染
+        render();
+
+        // 绑定滚动事件 (使用 rAF 保证丝滑)
+        container._scrollHandler = () => window.requestAnimationFrame(render);
+        container.addEventListener('scroll', container._scrollHandler);
+    }
 
     function doDanmakuTypeFilterSelect() {
         const checkList = Array.from(document.getElementsByName(eleIds.danmakuTypeFilterSelectName))
@@ -7742,8 +8048,8 @@
         // 控制器输入左右超出边界时切换元素
         input.addEventListener('keydown', (event) => {
             if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
-                    ((input.selectionStart === 0 && event.key === 'ArrowLeft') ||
-                        (input.selectionEnd === input.value.length && event.key === 'ArrowRight'))) {
+                ((input.selectionStart === 0 && event.key === 'ArrowLeft') ||
+                    (input.selectionEnd === input.value.length && event.key === 'ArrowRight'))) {
                 event.stopPropagation();
                 event.preventDefault()
                 var options = {sourceElement: event.target, repeat: event.repeat, originalEvent: event };
@@ -7940,14 +8246,14 @@
         return textarea;
     }
 
-   /**
-    * @param {Object} opts { id: 'slider id', labelId: 'label id', orient: 'vertical' | 'horizontal' 垂直/水平, ... }
-    *   , will return to the callback
-    * @param {Function} onChange Trigger after end of tap/swipe, AndroidTV use this
-    * @param {Function} onSliding when init/clicking/sliding, trigger every step, AndroidTV not trigger
-    *   , but not trigger when init and options.value === options.min
-    * @returns HTMLElement
-    */
+    /**
+     * @param {Object} opts { id: 'slider id', labelId: 'label id', orient: 'vertical' | 'horizontal' 垂直/水平, ... }
+     *   , will return to the callback
+     * @param {Function} onChange Trigger after end of tap/swipe, AndroidTV use this
+     * @param {Function} onSliding when init/clicking/sliding, trigger every step, AndroidTV not trigger
+     *   , but not trigger when init and options.value === options.min
+     * @returns HTMLElement
+     */
     function embySlider(opts = {}, onChange, onSliding) {
         const defaultOpts = {
             orient: 'horizontal',
@@ -8086,14 +8392,14 @@
     function getSettingsJson(space = 4) {
         return JSON.stringify(Object.fromEntries(objectEntries(lsKeys).map(
             ([key, value]) => [value.id, lsGetItem(value.id)])), null, space);
-            // ([key, value]) => [value.id, { value: lsGetItem(value.id), name: value.name }])), null, space);
+        // ([key, value]) => [value.id, { value: lsGetItem(value.id), name: value.name }])), null, space);
     }
 
     function settingsReset() {
         const defaultSettings = Object.fromEntries(
             objectEntries(lsKeys)
-            .filter(([key, value]) => lsKeys.filterKeywords.id !== value.id)
-            .map(([key, value]) => [value.id, value.defaultValue])
+                .filter(([key, value]) => lsKeys.filterKeywords.id !== value.id)
+                .map(([key, value]) => [value.id, value.defaultValue])
         );
         lsBatchSet(defaultSettings);
     }
@@ -8110,18 +8416,21 @@
 
         // 兼容旧版字符串数组格式，转换为新格式
         if (list.length > 0 && typeof list[0] === 'string') {
-            list = list.map((url, index) => ({
-                name: `自定义源${index + 1}`,
-                url: url,
-                enabled: true
-            }));
+            list = list
+                .filter(url => url && (url.startsWith('http://') || url.startsWith('https://')))  // [修复] 过滤掉不合法的 URL
+                .map((url, index) => ({
+                    name: `自定义源${index + 1}`,
+                    url: url,
+                    enabled: true
+                }));
             lsSetItem(lsKeys.customApiList.id, list);
         }
 
         // 兼容旧版：如果列表为空但旧配置有值，则迁移
         if (list.length === 0) {
             const oldPrefix = lsGetItem(lsKeys.customApiPrefix.id);
-            if (oldPrefix && oldPrefix.trim()) {
+            // [修复] 旧配置迁移时校验 URL 格式，防止不完整 URL 导致 Worker 报错
+            if (oldPrefix && oldPrefix.trim() && (oldPrefix.trim().startsWith('http://') || oldPrefix.trim().startsWith('https://'))) {
                 list.push({ name: '自定义源1', url: oldPrefix.trim(), enabled: true });
                 lsSetItem(lsKeys.customApiList.id, list);
             }
@@ -8141,6 +8450,11 @@
      * 添加自定义弹幕源
      */
     function addCustomApiSource(name, url) {
+        // [修复] 函数级别校验 URL 格式，防止非法 URL 进入配置
+        if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+            console.warn('[dd-danmaku] 拒绝添加不合法的自定义源 URL:', url);
+            return;
+        }
         const list = getCustomApiList();
         // 检查URL是否已存在
         if (!list.some(item => item.url === url)) {
@@ -8291,7 +8605,7 @@
      * @returns {Promise<HTMLElement|null>} - 返回一个 Promise 对象:
      *   - 如果目标元素在超时时间内被找到,Promise 将 resolve 为目标元素 (HTMLElement)
      *   - 如果超时且未找到目标元素,Promise 将 reject 为一个 Error 对象,表示查找失败
-    */
+     */
     function waitForElement(target, callback, timeout = 10000, interval = check_interval) {
         let intervalId = null;
         let timeoutId = null;
@@ -8481,7 +8795,7 @@
 
         _media.play();
         videoTimeUpdateInterval(_media, true);
-         // 以下暂未遇到匿名函数导致的事件重复,等出现时再匿名转命名函数
+        // 以下暂未遇到匿名函数导致的事件重复,等出现时再匿名转命名函数
         // [修复] 添加seeking检测的防抖和初始化标志
         let lastSeekingTime = 0;
         let isFirstTimeUpdate = true;
@@ -8508,16 +8822,16 @@
                     const embyPlaybackRate = playerState?.PlayState?.PlaybackRate;
                     _media.playbackRate = embyPlaybackRate ? embyPlaybackRate : 1;
 
-                     // [修复] 跳过第一次时间更新（初始化时可能有大的时间差）
+                    // [修复] 跳过第一次时间更新（初始化时可能有大的时间差）
                     if (isFirstTimeUpdate) {
                         isFirstTimeUpdate = false;
                         if (lsGetItem(lsKeys.debugH5VideoAdapterEnable.id)) {
-                             logger.debug(`[虚拟播放器] 初始化时间: ${realCurrentTime}, 跳过seeking检测`);
+                            logger.debug(`[虚拟播放器] 初始化时间: ${realCurrentTime}, 跳过seeking检测`);
                         }
                         return;
                     }
-                     // [修复] 当前时间与上次记录时间差值大于阈值,且距离上次seeking超过防抖时间,则判定为用户操作进度
-                     // seeking 事件必须在 currentTime 更改后触发,否则回退后弹幕将消失
+                    // [修复] 当前时间与上次记录时间差值大于阈值,且距离上次seeking超过防抖时间,则判定为用户操作进度
+                    // seeking 事件必须在 currentTime 更改后触发,否则回退后弹幕将消失
                     const now = Date.now();
                     if (timeDiff > SEEKING_THRESHOLD && (now - lastSeekingTime) > SEEKING_DEBOUNCE) {
                         lastSeekingTime = now;
@@ -8542,19 +8856,19 @@
                 videoTimeUpdateInterval(_media, true);
             },
         });
-       logger.info('已创建虚拟 video 标签,适配器处理正确结束');
+        logger.info('已创建虚拟 video 标签,适配器处理正确结束');
     }
 
-   // 平滑补充<video> timeupdate 中秒级间隔缺失的 100ms 间隙
+    // 平滑补充<video> timeupdate 中秒级间隔缺失的 100ms 间隙
     function videoTimeUpdateInterval(media, enable) {
         const _media = media || document.querySelector(mediaQueryStr);
         if (!_media) { return; }
         if (enable && !_media.timeupdateIntervalId) {
-             // [修复] 移除重复的 setInterval 调用，只保留一个
-             _media.timeupdateIntervalId = setInterval(() => { _media.currentTime += 100 / 1000 }, 100);
+            // [修复] 移除重复的 setInterval 调用，只保留一个
+            _media.timeupdateIntervalId = setInterval(() => { _media.currentTime += 100 / 1000 }, 100);
         } else if (!enable && _media.timeupdateIntervalId) {
-             clearInterval(_media.timeupdateIntervalId);
-             _media.timeupdateIntervalId = null;
+            clearInterval(_media.timeupdateIntervalId);
+            _media.timeupdateIntervalId = null;
         }
     }
 
@@ -8563,7 +8877,7 @@
 
         // [备份逻辑] 智能推断需要这个，必须放在清空前
         if (window.ede && window.ede.episode_info) {
-            window.ede.previous_episode_info = window.ede.episode_info;
+            window.ede.previous_episode_info = { ...window.ede.episode_info };
         }
 
         // =========== [UI 瞬间清空区] ===========
@@ -8615,14 +8929,14 @@
             danmakuCtr.remove();
         }
         window._ddDanmakuInitUILock = false; // [修复] 重置全局锁，允许下次播放重新初始化
-       // const h5VideoAdapterEle = getById(eleIds.h5VideoAdapter);
-       // if (h5VideoAdapterEle) {
-       //     h5VideoAdapterEle.remove();
-       // }
-       // 销毁平滑补充 timeupdate 定时器
+        // const h5VideoAdapterEle = getById(eleIds.h5VideoAdapter);
+        // if (h5VideoAdapterEle) {
+        //     h5VideoAdapterEle.remove();
+        // }
+        // 销毁平滑补充 timeupdate 定时器
         videoTimeUpdateInterval(null, false);
 
-         // 销毁可能残留的定时器
+        // 销毁可能残留的定时器
         destroyAllInterval();
 
         // 退出播放页面重置轴偏秒
@@ -8686,7 +9000,7 @@
         // 检查当前 URL 是否包含 videoosd（播放页面）
         const currentPath = window.location.hash || window.location.pathname;
         const isVideoOsdPage = currentPath.includes('videoosd') ||
-                               document.querySelector(mediaContainerQueryStr + ' video');
+            document.querySelector(mediaContainerQueryStr + ' video');
 
         // 检查是否已经有视频元素（说明已经在播放页面）
         const hasVideoElement = document.querySelector('video');

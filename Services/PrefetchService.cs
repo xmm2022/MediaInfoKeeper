@@ -235,13 +235,13 @@ namespace MediaInfoKeeper.Services
             {
                 try
                 {
-                    var result = await Plugin.MediaInfoService
-                        .EnsurePlaybackMediaInfoAsync(
+                    var extracted = await MediaInfoRunner
+                        .ExtractMediaInfoAsync(
                             item.InternalId,
-                            source,
-                            cancellationToken: cancellationToken)
+                            $"{source} 媒体信息提取",
+                            cancellationToken)
                         .ConfigureAwait(false);
-                    if (result != null)
+                    if (extracted)
                     {
                         logger.Info($"{source}: 完成 {item.FileName ?? item.Name}");
                     }
