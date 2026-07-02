@@ -11,7 +11,7 @@ namespace MediaInfoKeeper.Patch
                 ? Array.Empty<string>()
                 : text
                     .Split(new[] { ',', ';', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(item => item?.Trim())
+                    .Select(item => item.Trim())
                     .Where(item => !string.IsNullOrWhiteSpace(item))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
