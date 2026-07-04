@@ -65,6 +65,7 @@ namespace MediaInfoKeeper
         public static IntroSkipChapterApi IntroSkipChapterApi { get; private set; }
         public static IntroSkipPlaySessionMonitor IntroSkipPlaySessionMonitor { get; private set; }
         public static PrefetchService PrefetchService { get; private set; }
+        internal static RangeCachePrewarmService RangeCachePrewarmService { get; private set; }
         public static StrmFileWatcher StrmFileWatcher { get; private set; }
         public static ExternalFiles ExternalFiles { get; private set; }
         public static DanmuService DanmuService { get; private set; }
@@ -198,6 +199,8 @@ namespace MediaInfoKeeper
                 libraryManager, userManager, sessionManager, this.logger);
             PrefetchService = new PrefetchService(
                 libraryManager, sessionManager, this.logger);
+            RangeCachePrewarmService = new RangeCachePrewarmService(
+                httpClient, this.logger, () => this.Options);
             StrmFileWatcher = new StrmFileWatcher(libraryMonitor, libraryManager, LibraryService, this.logger);
             PluginWebResourceLoader.Initialize(serverConfigurationManager);
             PrefetchService.Initialize();
@@ -499,6 +502,7 @@ namespace MediaInfoKeeper
                 var node = JsonNode.Parse(json);
                 RedactSecret(node, nameof(MainPageOptions.UpdatePluginTaskEditorOptions.GitHubToken));
                 RedactSecret(node, nameof(NetWorkOptions.AlternativeTmdbApiKey));
+                RedactSecret(node, nameof(MediaInfoOptions.RangeCachePrewarmSecret));
                 this.logger.Debug("{0} 配置{1}: {2}", this.Name, action, node?.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) ?? string.Empty);
             }
             catch (Exception ex)
@@ -645,6 +649,7 @@ namespace MediaInfoKeeper
 
                     // 判断当前条目是否已有 MediaInfo。
                     var hasMediaInfo = MediaInfoService.HasMediaInfo(item);
+                    var restoredMediaInfo = false;
                     if (!hasMediaInfo)
                     {
                         // 优先尝试从 JSON 恢复，减少首次提取耗时。
@@ -682,6 +687,7 @@ namespace MediaInfoKeeper
                         // 使用Json媒体信息数据，恢复成功后触发当前条目刷新。
                         else if (restoreResult == MediaInfoDocument.MediaInfoRestoreResult.Restored)
                         {
+                            restoredMediaInfo = true;
                             var itemPath = item.Path ?? item.ContainingFolderPath ?? item.InternalId.ToString();
                             this.logger.Info($"入库媒体信息: JSON 恢复成功 item={itemPath}");
 
@@ -694,6 +700,15 @@ namespace MediaInfoKeeper
                                 EmbeddedInfoStore.ApplyToItem(item);
                             }
                         }
+                        else if (restoreResult == MediaInfoDocument.MediaInfoRestoreResult.AlreadyExists)
+                        {
+                            restoredMediaInfo = true;
+                        }
+                    }
+
+                    if (RangeCachePrewarmTriggerPolicy.ShouldTriggerAfterItemAdded(hasMediaInfo, restoredMediaInfo))
+                    {
+                        TriggerRangeCachePrewarmAfterItemAdded(item, "入库媒体信息");
                     }
                     
                     // 收藏
@@ -757,6 +772,26 @@ namespace MediaInfoKeeper
                     }
                 }
             });
+        }
+
+        private void TriggerRangeCachePrewarmAfterItemAdded(BaseItem item, string source)
+        {
+            try
+            {
+                RangeCachePrewarmService?.TriggerAfterMediaInfoAvailable(
+                    item,
+                    source,
+                    MediaInfoService?.GetStaticMediaSources(item, false));
+            }
+            catch (Exception ex)
+            {
+                this.logger.Warn(
+                    "{0} Range Cache 预热触发失败: {1} item={2}",
+                    source,
+                    ex.Message,
+                    item?.FileName ?? item?.Path ?? item?.Name ?? "unknown");
+                this.logger.Debug(ex.StackTrace);
+            }
         }
 
         /// <summary> 收藏喜爱事件处 </summary>

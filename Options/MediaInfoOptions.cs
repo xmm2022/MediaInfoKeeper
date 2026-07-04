@@ -30,6 +30,18 @@ namespace MediaInfoKeeper.Options
         [Description("浏览视频或音频详情接口时，若条目没有媒体信息，则后台提取并写入 JSON。")]
         public bool ExtractMediaInfoOnItemDetail { get; set; } = false;
 
+        [DisplayName("提取成功后触发 Range Cache 预热")]
+        [Description("媒体信息提取或恢复成功后，调用 range-cache-proxy 内部接口预热 head/tail。默认关闭。")]
+        public bool EnableRangeCachePrewarm { get; set; } = false;
+
+        [DisplayName("Range Cache 预热接口")]
+        [Description("range-cache-proxy 内部接口地址。默认使用本机 loopback，不经过公网入口。")]
+        public string RangeCachePrewarmEndpoint { get; set; } = "http://127.0.0.1:18180/internal/prewarm";
+
+        [DisplayName("Range Cache 预热密钥")]
+        [Description("发送到 X-Range-Cache-Prewarm-Key 的内部密钥，应与 range-cache-proxy 的 prewarm_api_key 一致。")]
+        public string RangeCachePrewarmSecret { get; set; } = string.Empty;
+
         [DisplayName("MediaInfo JSON 存储根目录")]
         [Description("默认使用 Emby的 /config/data/MediaInfoKeeper 子目录保存。视频等媒体保存在 /your-path/FileNameWithoutExtension-mediainfo.json；音频保存在 /your-path/music/FileNameWithoutExtension-mediainfo.json。若当前值为空，JSON 保存到媒体文件同目录。")]
         [EditFolderPicker]

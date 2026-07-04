@@ -163,6 +163,7 @@ namespace MediaInfoKeeper.Services
                 if (HasRequiredMediaInfo(item, requiredStreamTypes))
                 {
                     this.logger.Info($"{source} 提取媒体信息队列出队 已存在媒体流: {displayName}");
+                    TriggerRangeCachePrewarm(item, source);
                     return true;
                 }
 
@@ -178,6 +179,7 @@ namespace MediaInfoKeeper.Services
 
                 if (result == MediaInfoExtractionAttemptResult.Succeeded)
                 {
+                    TriggerRangeCachePrewarm(item, source);
                     return true;
                 }
 
@@ -253,6 +255,26 @@ namespace MediaInfoKeeper.Services
 
                 this.logger.Info($"{source} 提取成功: {displayName}");
                 return MediaInfoExtractionAttemptResult.Succeeded;
+            }
+        }
+
+        private void TriggerRangeCachePrewarm(BaseItem item, string source)
+        {
+            try
+            {
+                Plugin.RangeCachePrewarmService?.TriggerAfterMediaInfoAvailable(
+                    item,
+                    source,
+                    GetStaticMediaSources(item, false));
+            }
+            catch (Exception ex)
+            {
+                this.logger.Warn(
+                    "{0} Range Cache 预热触发失败: {1} item={2}",
+                    source,
+                    ex.Message,
+                    item?.FileName ?? item?.Path ?? item?.Name ?? "unknown");
+                this.logger.Debug(ex.StackTrace);
             }
         }
 
