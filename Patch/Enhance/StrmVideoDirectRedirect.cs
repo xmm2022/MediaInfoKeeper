@@ -33,7 +33,7 @@ namespace MediaInfoKeeper.Patch
         private static Type streamStateType;
         private static Type videoStreamRequestType;
         private static bool followRedirect302 = true;
-        private static string[] clientBlacklist = Array.Empty<string>();
+        private static string[] videoClientBlacklist = Array.Empty<string>();
 
         public static bool IsReady => harmony != null
             && processRequestMethod != null
@@ -45,17 +45,17 @@ namespace MediaInfoKeeper.Patch
             ILogger pluginLogger,
             bool enabled,
             bool follow302,
-            string clientBlacklistText)
+            string videoClientBlacklistText)
         {
             if (harmony != null)
             {
-                Configure(enabled, follow302, clientBlacklistText);
+                Configure(enabled, follow302, videoClientBlacklistText);
                 return;
             }
 
             logger = pluginLogger;
             isEnabled = enabled;
-            ApplySettings(follow302, clientBlacklistText);
+            ApplySettings(follow302, videoClientBlacklistText);
 
             try
             {
@@ -156,10 +156,13 @@ namespace MediaInfoKeeper.Patch
             }
         }
 
-        public static void Configure(bool enabled, bool follow302, string clientBlacklistText)
+        public static void Configure(
+            bool enabled,
+            bool follow302,
+            string videoClientBlacklistText)
         {
             isEnabled = enabled;
-            ApplySettings(follow302, clientBlacklistText);
+            ApplySettings(follow302, videoClientBlacklistText);
             if (harmony == null)
             {
                 return;
@@ -219,7 +222,7 @@ namespace MediaInfoKeeper.Patch
                 return true;
             }
 
-            if (!ResolveStrmPath(__0, out var strmPath))
+            if (!IsEligibleRequest(__0))
             {
                 return true;
             }
@@ -308,6 +311,18 @@ namespace MediaInfoKeeper.Patch
             }
 
             return state;
+        }
+
+        /// <summary>视频直连只处理 .strm 条目。</summary>
+        private static bool IsEligibleRequest(object request)
+        {
+            return ResolveStrmPath(request);
+        }
+
+        /// <summary>判断播放请求对应条目是否为 .strm。</summary>
+        private static bool ResolveStrmPath(object request)
+        {
+            return ResolveStrmPath(request, out _);
         }
 
         /// <summary>从播放请求中解析出当前条目的 .strm 路径。</summary>
@@ -415,10 +430,12 @@ namespace MediaInfoKeeper.Patch
         }
 
         /// <summary>应用运行时配置，并在必要时清理缓存与预加载去重状态。</summary>
-        private static void ApplySettings(bool follow302, string clientBlacklistText)
+        private static void ApplySettings(
+            bool follow302,
+            string videoClientBlacklistText)
         {
             followRedirect302 = follow302;
-            clientBlacklist = ParseClientBlacklist(clientBlacklistText);
+            videoClientBlacklist = ParseClientBlacklist(videoClientBlacklistText);
         }
 
         /// <summary>解析用于 302 返回的直链地址；开启跟踪时主动探测最终地址，否则直接返回原始 URL。</summary>
@@ -474,7 +491,7 @@ namespace MediaInfoKeeper.Patch
 
         private static bool IsClientBlocked(IRequest requestContext)
         {
-            if (requestContext == null || clientBlacklist.Length == 0)
+            if (requestContext == null || videoClientBlacklist.Length == 0)
             {
                 return false;
             }
@@ -485,7 +502,7 @@ namespace MediaInfoKeeper.Patch
                 return false;
             }
 
-            if (clientBlacklist.Any(pattern =>
+            if (videoClientBlacklist.Any(pattern =>
                     client.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0))
             {
                 logger?.Info(

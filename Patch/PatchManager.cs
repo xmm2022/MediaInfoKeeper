@@ -461,14 +461,14 @@ namespace MediaInfoKeeper.Patch
                 Name = "StrmVideoDirectRedirect",
                 Initialize = options => StrmVideoDirectRedirect.Initialize(
                     logger,
-                    options.Enhance.EnableStrmDirectRedirect,
-                    options.Enhance.StrmDirectRedirectFollow302,
+                    options.Enhance.EnableStrmVideoDirectRedirect,
+                    options.Enhance.StrmVideoDirectRedirectFollow302,
                     options.Enhance.StrmVideoDirectRedirectClientBlacklist),
                 Configure = options => StrmVideoDirectRedirect.Configure(
-                    IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
-                    options.Enhance.StrmDirectRedirectFollow302,
+                    IsPluginEnabled(options) && options.Enhance.EnableStrmVideoDirectRedirect,
+                    options.Enhance.StrmVideoDirectRedirectFollow302,
                     options.Enhance.StrmVideoDirectRedirectClientBlacklist),
-                IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
+                IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmVideoDirectRedirect,
                 IsReady = () => StrmVideoDirectRedirect.IsReady
             });
 
@@ -477,14 +477,14 @@ namespace MediaInfoKeeper.Patch
                 Name = "StrmAudioDirectRedirect",
                 Initialize = options => StrmAudioDirectRedirect.Initialize(
                     logger,
-                    options.Enhance.EnableStrmDirectRedirect,
-                    options.Enhance.StrmDirectRedirectFollow302,
+                    options.Enhance.EnableStrmAudioDirectRedirect,
+                    options.Enhance.StrmAudioDirectRedirectFollow302,
                     options.Enhance.StrmAudioDirectRedirectClientBlacklist),
                 Configure = options => StrmAudioDirectRedirect.Configure(
-                    IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
-                    options.Enhance.StrmDirectRedirectFollow302,
+                    IsPluginEnabled(options) && options.Enhance.EnableStrmAudioDirectRedirect,
+                    options.Enhance.StrmAudioDirectRedirectFollow302,
                     options.Enhance.StrmAudioDirectRedirectClientBlacklist),
-                IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
+                IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmAudioDirectRedirect,
                 IsReady = () => StrmAudioDirectRedirect.IsReady
             });
 

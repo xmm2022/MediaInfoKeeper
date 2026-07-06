@@ -76,24 +76,34 @@ namespace MediaInfoKeeper.Options
                 SearchItemType.MusicTrack
             });
         
-        [DisplayName("Strm 直连")]
-        [Description("对无需转码且可直放的远端 http .strm 视频和音乐生效，让客户端直接拉取直链而不是经 Emby 中转。")]
-        public bool EnableStrmDirectRedirect { get; set; } = false;
+        [DisplayName("视频 Strm 直连")]
+        [Description("对无需转码且可直放的远端 http .strm 视频生效，让客户端直接拉取直链而不是经 Emby 中转。")]
+        public bool EnableStrmVideoDirectRedirect { get; set; } = false;
 
-        [DisplayName("跟踪 302 跳转")]
-        [Description("开启后会跟踪到 302 最终地址，客户端重定向到最终直链；关闭后直接返回 .strm 中的原始 URL。")]
-        [VisibleCondition(nameof(EnableStrmDirectRedirect), SimpleCondition.IsTrue)]
-        public bool StrmDirectRedirectFollow302 { get; set; } = true;
-        
+        [DisplayName("视频跟踪 302 跳转")]
+        [Description("开启后视频直连会跟踪到 302 最终地址；关闭后直接返回 .strm 中的原始 URL。")]
+        [VisibleCondition(nameof(EnableStrmVideoDirectRedirect), SimpleCondition.IsTrue)]
+        public bool StrmVideoDirectRedirectFollow302 { get; set; } = true;
+
         [DisplayName("视频直连客户端黑名单")]
-        [VisibleCondition(nameof(EnableStrmDirectRedirect), SimpleCondition.IsTrue)]
+        [Description("按客户端名称关键字匹配，命中的客户端不启用视频 .strm 302 直连。支持逗号、分号或换行分隔。")]
+        [VisibleCondition(nameof(EnableStrmVideoDirectRedirect), SimpleCondition.IsTrue)]
         public string StrmVideoDirectRedirectClientBlacklist { get; set; } = string.Empty;
-        
+
+        [DisplayName("音乐 Strm 直连")]
+        [Description("对无需转码且可直放的远端 http .strm 音乐生效，让客户端直接拉取直链而不是经 Emby 中转。")]
+        public bool EnableStrmAudioDirectRedirect { get; set; } = false;
+
+        [DisplayName("音乐跟踪 302 跳转")]
+        [Description("开启后音乐直连会跟踪到 302 最终地址；关闭后直接返回 .strm 中的原始 URL。")]
+        [VisibleCondition(nameof(EnableStrmAudioDirectRedirect), SimpleCondition.IsTrue)]
+        public bool StrmAudioDirectRedirectFollow302 { get; set; } = true;
+
         [DisplayName("音乐直连客户端黑名单")]
-        [Description("按客户端名称关键字匹配，命中的客户端不启用 .strm 302 直连。支持逗号、分号或换行分隔。")]
-        [VisibleCondition(nameof(EnableStrmDirectRedirect), SimpleCondition.IsTrue)]
+        [Description("按客户端名称关键字匹配，命中的客户端不启用音乐 .strm 302 直连。支持逗号、分号或换行分隔。")]
+        [VisibleCondition(nameof(EnableStrmAudioDirectRedirect), SimpleCondition.IsTrue)]
         public string StrmAudioDirectRedirectClientBlacklist { get; set; } = "Emby Web";
-        
+
         [DisplayName("启用深度删除")]
         [Description("删除媒体时，尝试级联删除 STRM 或软链接目标文件及相关文件和空目录。")]
         public bool EnableDeepDelete { get; set; } = false;
@@ -303,10 +313,12 @@ namespace MediaInfoKeeper.Options
                 nameof(ExcludeOriginalTitleFromSearch),
                 nameof(SearchScope));
 
-            AddGroup("Emby Strm", "",
-                nameof(EnableStrmDirectRedirect),
-                nameof(StrmDirectRedirectFollow302),
+            AddGroup("Emby 直连", "",
+                nameof(EnableStrmVideoDirectRedirect),
+                nameof(StrmVideoDirectRedirectFollow302),
                 nameof(StrmVideoDirectRedirectClientBlacklist),
+                nameof(EnableStrmAudioDirectRedirect),
+                nameof(StrmAudioDirectRedirectFollow302),
                 nameof(StrmAudioDirectRedirectClientBlacklist));
 
             AddGroup("深度删除", "",
