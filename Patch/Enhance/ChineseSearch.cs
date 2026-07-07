@@ -33,6 +33,7 @@ namespace MediaInfoKeeper.Patch
         private static MethodInfo createConnection;
         private static PropertyInfo dbFilePath;
         private static MethodInfo getJoinCommandText;
+        private static MethodInfo getJoinCommandTextExtended;
         private static MethodInfo createSearchTerm;
         private static MethodInfo cacheIdsFromTextParams;
 
@@ -156,6 +157,27 @@ namespace MediaInfoKeeper.Patch
                         },
                         logger,
                         "ChineseSearch.SqliteItemRepository.GetJoinCommandText");
+                    getJoinCommandTextExtended = PatchMethodResolver.Resolve(
+                        sqliteItemRepository,
+                        embyServerImplementationsAssembly.GetName().Version,
+                        new MethodSignatureProfile
+                        {
+                            Name = "sqliteitemrepository-getjoincommandtext-extended-exact",
+                            MethodName = "GetJoinCommandText",
+                            BindingFlags = BindingFlags.NonPublic | BindingFlags.Instance,
+                            ParameterTypes = new[]
+                            {
+                                typeof(InternalItemsQuery),
+                                typeof(List<KeyValuePair<string, string>>),
+                                typeof(string),
+                                typeof(string),
+                                typeof(bool)
+                            },
+                            ReturnType = typeof(StringBuilder),
+                            IsStatic = false
+                        },
+                        logger,
+                        "ChineseSearch.SqliteItemRepository.GetJoinCommandText.extended");
                     createSearchTerm = PatchMethodResolver.Resolve(
                         sqliteItemRepository,
                         resolverVersion,
@@ -189,6 +211,7 @@ namespace MediaInfoKeeper.Patch
                         "ChineseSearch.CacheIdsFromTextParams");
 
                     if (createConnection == null || dbFilePath == null || getJoinCommandText == null ||
+                        getJoinCommandTextExtended == null ||
                         cacheIdsFromTextParams == null || sqlite3_db == null)
                     {
                         PatchLog.InitFailed(logger, nameof(ChineseSearch), "缺少反射目标");
@@ -229,6 +252,18 @@ namespace MediaInfoKeeper.Patch
 
             if (EnsureTokenizerExists() && PatchCreateConnection())
             {
+                if (enableChineseSearch &&
+                    string.Equals(CurrentTokenizerName, "simple", StringComparison.Ordinal) &&
+                    !PatchSearchFunctions())
+                {
+                    logger?.Warn(
+                        "增强搜索 - 搜索函数补丁未安装，首字母拼音搜索可能无效。targets={0}; {1}; {2}; {3}",
+                        getJoinCommandText,
+                        getJoinCommandTextExtended,
+                        createSearchTerm,
+                        cacheIdsFromTextParams);
+                }
+
                 return;
             }
 
@@ -536,6 +571,18 @@ namespace MediaInfoKeeper.Patch
                 }
 
                 CurrentTokenizerName = targetTokenizer;
+                if (string.Equals(targetTokenizer, "simple", StringComparison.Ordinal) &&
+                    !PatchSearchFunctions())
+                {
+                    logger?.Warn(
+                        "增强搜索 - 搜索函数补丁未安装，首字母拼音搜索可能无效。targets={0}; {1}; {2}; {3}",
+                        getJoinCommandText,
+                        getJoinCommandTextExtended,
+                        createSearchTerm,
+                        cacheIdsFromTextParams);
+                    return false;
+                }
+
                 logger?.Info("增强搜索 - 重建搜索索引成功。");
                 logger?.Info($"增强搜索 - 重建后当前分词器：{CurrentTokenizerName}");
                 return true;
@@ -826,6 +873,8 @@ namespace MediaInfoKeeper.Patch
             {
                 harmony.Patch(getJoinCommandText,
                     postfix: new HarmonyMethod(typeof(ChineseSearch), nameof(GetJoinCommandTextPostfix)));
+                harmony.Patch(getJoinCommandTextExtended,
+                    postfix: new HarmonyMethod(typeof(ChineseSearch), nameof(GetJoinCommandTextPostfix)));
                 if (createSearchTerm != null)
                 {
                     harmony.Patch(createSearchTerm,
@@ -1039,6 +1088,20 @@ namespace MediaInfoKeeper.Patch
                         @"\bmatch\b\s*\(?\s*@SearchTerm\b",
                         replacement,
                         RegexOptions.IgnoreCase);
+
+                    if (bindParams != null)
+                    {
+                        for (var i = 0; i < bindParams.Count; i++)
+                        {
+                            if (bindParams[i].Key == "@SearchTerm")
+                            {
+                                bindParams[i] = new KeyValuePair<string, string>(
+                                    bindParams[i].Key,
+                                    NormalizeSearchTerm(query.SearchTerm));
+                                break;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1053,7 +1116,7 @@ namespace MediaInfoKeeper.Patch
                     "match 'Name:' || simple_query(@SearchTerm)",
                     RegexOptions.IgnoreCase);
 
-                for (var i = 0; i < bindParams.Count; i++)
+                for (var i = 0; bindParams != null && i < bindParams.Count; i++)
                 {
                     var kvp = bindParams[i];
                     if (kvp.Key == "@SearchTerm")
