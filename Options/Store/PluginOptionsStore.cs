@@ -105,6 +105,8 @@ namespace MediaInfoKeeper.Options.Store
                 }
             }
 
+            PluginOptionsJsonMigration.MigrateLegacyEnhanceOptions(root);
+
             return root;
         }
 

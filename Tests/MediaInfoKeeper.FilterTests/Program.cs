@@ -1,6 +1,8 @@
 using MediaInfoKeeper.Common;
+using MediaInfoKeeper.Options.Store;
 using MediaInfoKeeper.Patch;
 using MediaInfoKeeper.Services;
+using System.Text.Json.Nodes;
 
 static void AssertTrue(bool condition, string message)
 {
@@ -116,3 +118,41 @@ AssertTrue(
 AssertFalse(
     RangeCachePrewarmTriggerPolicy.ShouldTriggerAfterItemAdded(hasMediaInfo: false, restoredMediaInfo: false),
     "item-added prewarm should wait until MediaInfo is available");
+
+var legacyEnhanceRoot = JsonNode.Parse(
+    "{\"Enhance\":{\"EnableStrmDirectRedirect\":true,\"StrmDirectRedirectFollow302\":false}}")!.AsObject();
+PluginOptionsJsonMigration.MigrateLegacyEnhanceOptions(legacyEnhanceRoot);
+var migratedEnhance = legacyEnhanceRoot["Enhance"]!.AsObject();
+
+AssertTrue(
+    migratedEnhance["EnableStrmVideoDirectRedirect"]!.GetValue<bool>(),
+    "legacy unified STRM redirect enable should migrate to video direct redirect");
+
+AssertTrue(
+    migratedEnhance["EnableStrmAudioDirectRedirect"]!.GetValue<bool>(),
+    "legacy unified STRM redirect enable should migrate to audio direct redirect");
+
+AssertFalse(
+    migratedEnhance["StrmVideoDirectRedirectFollow302"]!.GetValue<bool>(),
+    "legacy unified STRM follow-302 setting should migrate to video direct redirect");
+
+AssertFalse(
+    migratedEnhance["StrmAudioDirectRedirectFollow302"]!.GetValue<bool>(),
+    "legacy unified STRM follow-302 setting should migrate to audio direct redirect");
+
+var mixedEnhanceRoot = JsonNode.Parse(
+    "{\"Enhance\":{\"EnableStrmDirectRedirect\":true,\"EnableStrmVideoDirectRedirect\":false,\"StrmDirectRedirectFollow302\":false,\"StrmVideoDirectRedirectFollow302\":true}}")!.AsObject();
+PluginOptionsJsonMigration.MigrateLegacyEnhanceOptions(mixedEnhanceRoot);
+var mixedEnhance = mixedEnhanceRoot["Enhance"]!.AsObject();
+
+AssertFalse(
+    mixedEnhance["EnableStrmVideoDirectRedirect"]!.GetValue<bool>(),
+    "legacy STRM migration should not overwrite an explicit video direct redirect setting");
+
+AssertTrue(
+    mixedEnhance["EnableStrmAudioDirectRedirect"]!.GetValue<bool>(),
+    "legacy STRM migration should still populate missing audio direct redirect setting");
+
+AssertTrue(
+    mixedEnhance["StrmVideoDirectRedirectFollow302"]!.GetValue<bool>(),
+    "legacy STRM migration should not overwrite an explicit video follow-302 setting");
