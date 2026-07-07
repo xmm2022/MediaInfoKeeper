@@ -144,7 +144,8 @@ namespace MediaInfoKeeper.Patch
                 Initialize = _ => ProviderManager.Initialize(logger, true),
                 Configure = _ => ProviderManager.Configure(true),
                 IsEnabled = options => IsPluginEnabled(options),
-                IsReady = () => ProviderManager.IsReady
+                IsReady = () => ProviderManager.IsReady,
+                Notes = () => "carry media item context for explicit ffprobe scopes"
             });
 
             registrations.Add(new PatchRegistration
@@ -460,18 +461,18 @@ namespace MediaInfoKeeper.Patch
                 Name = "StrmVideoDirectRedirect",
                 Initialize = options => StrmVideoDirectRedirect.Initialize(
                     logger,
-                    options.Enhance.EnableStrmDirectRedirect,
-                    options.Enhance.StrmDirectRedirectFollow302,
+                    options.Enhance.EnableStrmVideoDirectRedirect,
+                    options.Enhance.StrmVideoDirectRedirectFollow302,
                     options.Enhance.StrmDirectRedirectUrlAllowlist,
                     options.Enhance.StrmDirectRedirectUrlBlocklist,
                     options.Enhance.StrmVideoDirectRedirectClientBlacklist),
                 Configure = options => StrmVideoDirectRedirect.Configure(
-                    IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
-                    options.Enhance.StrmDirectRedirectFollow302,
+                    IsPluginEnabled(options) && options.Enhance.EnableStrmVideoDirectRedirect,
+                    options.Enhance.StrmVideoDirectRedirectFollow302,
                     options.Enhance.StrmDirectRedirectUrlAllowlist,
                     options.Enhance.StrmDirectRedirectUrlBlocklist,
                     options.Enhance.StrmVideoDirectRedirectClientBlacklist),
-                IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
+                IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmVideoDirectRedirect,
                 IsReady = () => StrmVideoDirectRedirect.IsReady
             });
 
@@ -480,18 +481,18 @@ namespace MediaInfoKeeper.Patch
                 Name = "StrmAudioDirectRedirect",
                 Initialize = options => StrmAudioDirectRedirect.Initialize(
                     logger,
-                    options.Enhance.EnableStrmDirectRedirect,
-                    options.Enhance.StrmDirectRedirectFollow302,
+                    options.Enhance.EnableStrmAudioDirectRedirect,
+                    options.Enhance.StrmAudioDirectRedirectFollow302,
                     options.Enhance.StrmDirectRedirectUrlAllowlist,
                     options.Enhance.StrmDirectRedirectUrlBlocklist,
                     options.Enhance.StrmAudioDirectRedirectClientBlacklist),
                 Configure = options => StrmAudioDirectRedirect.Configure(
-                    IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
-                    options.Enhance.StrmDirectRedirectFollow302,
+                    IsPluginEnabled(options) && options.Enhance.EnableStrmAudioDirectRedirect,
+                    options.Enhance.StrmAudioDirectRedirectFollow302,
                     options.Enhance.StrmDirectRedirectUrlAllowlist,
                     options.Enhance.StrmDirectRedirectUrlBlocklist,
                     options.Enhance.StrmAudioDirectRedirectClientBlacklist),
-                IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmDirectRedirect,
+                IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmAudioDirectRedirect,
                 IsReady = () => StrmAudioDirectRedirect.IsReady
             });
 

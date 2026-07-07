@@ -108,15 +108,26 @@ namespace MediaInfoKeeper.ScheduledTask
                     embyVersion,
                     updateChannel);
 
-                var apiResult = await Plugin.ReleaseInfoService.RefreshAndSelectReleaseForChannelAsync(cancellationToken, updateChannel, githubToken).ConfigureAwait(false);
+                var apiResult = Plugin.ReleaseInfoService.SelectCachedReleaseForChannel(updateChannel);
+                var cachedReleaseTag = GetReleaseTag(apiResult);
+                var shouldRefetchRelease = string.IsNullOrWhiteSpace(cachedReleaseTag) ||
+                                           string.Equals(currentVersionText, cachedReleaseTag, StringComparison.OrdinalIgnoreCase);
+                if (shouldRefetchRelease)
+                {
+                    logger.Info("缓存中没有明确的新版本，正在重新获取 GitHub Releases 以确认最新插件版本。");
+                    apiResult = await Plugin.ReleaseInfoService.RefreshAndSelectReleaseForChannelAsync(cancellationToken, updateChannel, githubToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    logger.Info("缓存中已有明确的新版本：当前插件={0}，目标版本={1}，跳过 GitHub Releases 重新获取。", currentVersionText, cachedReleaseTag);
+                }
+
                 if (apiResult == null)
                 {
                     throw new Exception("未找到匹配当前更新频道的 Release");
                 }
 
-                var latestReleaseTag = string.IsNullOrWhiteSpace(apiResult?.tag_name)
-                    ? "0.0.0.0"
-                    : apiResult.tag_name.Trim();
+                var latestReleaseTag = GetReleaseTag(apiResult);
                 var compatibility = await FetchCompatibilityManifest(cancellationToken, updatePluginOptions?.GitHubRepository, updateChannel, apiResult.prerelease).ConfigureAwait(false);
                 var (minVersion, maxVersion) = GetEmbyVersionRange(compatibility);
                 logger.Info(
@@ -129,7 +140,8 @@ namespace MediaInfoKeeper.ScheduledTask
 
                 if (string.Equals(currentVersionText, latestReleaseTag, StringComparison.OrdinalIgnoreCase))
                 {
-                    logger.Info("无需更新：目标 Tag 与当前插件版本一致，tag={0}", latestReleaseTag);
+                    logger.Info("无需下载：已重新检查最新 Release，目标 Tag 与当前插件版本一致，tag={0}", latestReleaseTag);
+                    await DisplayMessageAsync($"插件已是最新版本：{currentVersionText}").ConfigureAwait(false);
                     progress.Report(100);
                     return;
                 }
@@ -321,9 +333,15 @@ namespace MediaInfoKeeper.ScheduledTask
 
                 logger.Error("插件更新失败：{0}", ex.Message);
                 logger.Debug(ex.StackTrace);
+                await DisplayMessageAsync($"插件更新失败：{ex.Message}").ConfigureAwait(false);
             }
 
             progress.Report(100);
+        }
+
+        private static Task DisplayMessageAsync(string message)
+        {
+            return Plugin.NotificationApi?.DisplayMessage(message) ?? Task.CompletedTask;
         }
 
         private async Task<PluginCompatibilityInfo> FetchCompatibilityManifest(
@@ -346,6 +364,7 @@ namespace MediaInfoKeeper.ScheduledTask
                     LogRequest = true,
                     LogResponse = true
                 };
+                AddRefetchHeaders(manifestRequestOptions);
                 if (!string.IsNullOrWhiteSpace(githubToken))
                 {
                     manifestRequestOptions.RequestHeaders["Authorization"] = $"token {githubToken}";
@@ -379,6 +398,12 @@ namespace MediaInfoKeeper.ScheduledTask
 
             logger.Info("未获取到 Version.json 兼容信息，默认允许更新。");
             return null;
+        }
+
+        private static void AddRefetchHeaders(HttpRequestOptions requestOptions)
+        {
+            requestOptions.RequestHeaders["Cache-Control"] = "no-cache";
+            requestOptions.RequestHeaders["Pragma"] = "no-cache";
         }
 
         private static PluginCompatibilityInfo SelectCompatibilityInfo(
@@ -469,6 +494,18 @@ namespace MediaInfoKeeper.ScheduledTask
             }
 
             return $"{prefix.TrimEnd('/')}/{url.TrimStart('/')}";
+        }
+
+        private static string GetReleaseTag(ReleaseInfoService.ReleaseInfo releaseInfo)
+        {
+            if (releaseInfo == null)
+            {
+                return null;
+            }
+
+            return string.IsNullOrWhiteSpace(releaseInfo.tag_name)
+                ? "0.0.0.0"
+                : releaseInfo.tag_name.Trim();
         }
 
         private static Version ParseOptionalVersion(string value)

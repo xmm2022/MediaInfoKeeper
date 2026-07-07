@@ -172,6 +172,22 @@ namespace MediaInfoKeeper.Services
             return SelectReleaseForChannel(releases, updateChannel);
         }
 
+        public ReleaseInfo SelectCachedReleaseForChannel(string updateChannel)
+        {
+            List<ReleaseInfo> releases;
+            lock (this.syncRoot)
+            {
+                if (this.releaseCache.Count == 0)
+                {
+                    return null;
+                }
+
+                releases = this.releaseCache.ToList();
+            }
+
+            return SelectReleaseForChannel(releases, updateChannel);
+        }
+
         private static ReleaseInfo SelectReleaseForChannel(
             IEnumerable<ReleaseInfo> releases,
             string updateChannel)
@@ -381,6 +397,7 @@ namespace MediaInfoKeeper.Services
                 LogRequest = true,
                 LogResponse = true
             };
+            AddRefetchHeaders(releaseRequestOptions);
             if (!string.IsNullOrWhiteSpace(githubToken))
             {
                 releaseRequestOptions.RequestHeaders["Authorization"] = $"token {githubToken}";
@@ -402,6 +419,12 @@ namespace MediaInfoKeeper.Services
 
             return JsonSerializer.Deserialize<List<ReleaseInfo>>(releaseResponseBody, JsonOptions) ??
                    new List<ReleaseInfo>();
+        }
+
+        private static void AddRefetchHeaders(HttpRequestOptions requestOptions)
+        {
+            requestOptions.RequestHeaders["Cache-Control"] = "no-cache";
+            requestOptions.RequestHeaders["Pragma"] = "no-cache";
         }
 
         internal sealed class ReleaseAssetInfo

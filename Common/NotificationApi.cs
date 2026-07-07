@@ -214,6 +214,32 @@ namespace MediaInfoKeeper.Common
             }
         }
 
+        public async Task DisplayMessage(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return;
+            }
+
+            var sessions = this.sessionManager.Sessions
+                .Where(CanDisplayMessage)
+                .ToArray();
+
+            foreach (var session in sessions)
+            {
+                var message = new MessageCommand
+                {
+                    Header = Plugin.PluginName,
+                    Text = text,
+                    TimeoutMs = DefaultDisplayMessageTimeoutMs
+                };
+
+                await this.sessionManager
+                    .SendMessageCommand(session.Id, session.Id, message, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+        }
+
         private bool CanDisplayMessage(SessionInfo session)
         {
             return session?.SupportedCommands?.Contains("DisplayMessage") == true;

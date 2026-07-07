@@ -228,7 +228,7 @@ namespace MediaInfoKeeper.Patch
                 return true;
             }
 
-            if (!ResolveStrmPath(__0, out var strmPath))
+            if (!IsEligibleRequest(__0))
             {
                 return true;
             }
@@ -327,6 +327,18 @@ namespace MediaInfoKeeper.Patch
             }
 
             return state;
+        }
+
+        /// <summary>视频直连只处理 .strm 条目。</summary>
+        private static bool IsEligibleRequest(object request)
+        {
+            return ResolveStrmPath(request);
+        }
+
+        /// <summary>判断播放请求对应条目是否为 .strm。</summary>
+        private static bool ResolveStrmPath(object request)
+        {
+            return ResolveStrmPath(request, out _);
         }
 
         /// <summary>从播放请求中解析出当前条目的 .strm 路径。</summary>

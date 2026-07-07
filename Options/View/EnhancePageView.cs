@@ -43,7 +43,17 @@ namespace MediaInfoKeeper.Options.View
         {
             if (string.Equals(commandId, OptimizeDatabaseCommandId, StringComparison.Ordinal))
             {
-                await Task.Run(() => ExecuteOptimizeDatabase()).ConfigureAwait(false);
+                if (Plugin.NotificationApi != null)
+                {
+                    await Plugin.NotificationApi.DisplayMessage(this.User, "开始优化数据库").ConfigureAwait(false);
+                }
+
+                var message = await Task.Run(() => ExecuteOptimizeDatabase()).ConfigureAwait(false);
+                if (Plugin.NotificationApi != null)
+                {
+                    await Plugin.NotificationApi.DisplayMessage(this.User, message).ConfigureAwait(false);
+                }
+
                 this.ContentData = this.store.GetOptions();
                 return this;
             }
@@ -58,10 +68,10 @@ namespace MediaInfoKeeper.Options.View
             return base.OnSaveCommand(itemId, commandId, data);
         }
 
-        private void ExecuteOptimizeDatabase(CancellationToken cancellationToken = default)
+        private string ExecuteOptimizeDatabase(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            this.logger.Info("开始执行: 优化数据库（重建搜索索引 + 清理裂图记录）");
+            this.logger.Info("开始执行: 优化数据库（重建搜索索引 + 重建排序名 + 清理裂图记录）");
 
             var rebuilt = ChineseSearch.RebuildSearchIndex();
             if (!rebuilt)
@@ -72,6 +82,8 @@ namespace MediaInfoKeeper.Options.View
             var updatedItems = 0;
             var removedItemImages = 0;
             var removedChapterImages = 0;
+            var rebuiltSortNames = 0;
+            var pinyinSortNameEnabled = Plugin.Instance?.Options?.Enhance?.EnablePinyinSortName == true;
             var items = this.libraryManager.GetItemList(new InternalItemsQuery
             {
                 Recursive = true
@@ -83,16 +95,29 @@ namespace MediaInfoKeeper.Options.View
 
                 var currentRemovedItemImages = RemoveBrokenItemImages(item);
                 var currentRemovedChapterImages = RemoveBrokenChapterImages(item);
-                if (currentRemovedItemImages > 0 || currentRemovedChapterImages > 0)
+                var sortNameRebuilt = PinyinSortName.RebuildSortName(item);
+                if (currentRemovedItemImages == 0 && currentRemovedChapterImages == 0 && !sortNameRebuilt)
                 {
-                    updatedItems++;
-                    removedItemImages += currentRemovedItemImages;
-                    removedChapterImages += currentRemovedChapterImages;
+                    continue;
+                }
+
+                updatedItems++;
+                removedItemImages += currentRemovedItemImages;
+                removedChapterImages += currentRemovedChapterImages;
+
+                if (sortNameRebuilt)
+                {
+                    rebuiltSortNames++;
+                    item.UpdateToRepository(ItemUpdateType.MetadataEdit);
                 }
             }
 
+            var message =
+                $"数据库优化完成：排序名 {rebuiltSortNames}，裂图 {removedItemImages + removedChapterImages}";
             this.logger.Info(
-                $"数据库优化完成: 重建搜索索引 True，删除条目图片 {removedItemImages} 条，删除章节图片 {removedChapterImages} 条，影响条目 {updatedItems} 个");
+                $"数据库优化完成: 重建搜索索引 True，排序名规则 {(pinyinSortNameEnabled ? "拼音" : "Emby 原生")}，重建排序名 {rebuiltSortNames} 个，删除条目图片 {removedItemImages} 条，删除章节图片 {removedChapterImages} 条，影响条目 {updatedItems} 个");
+
+            return message;
         }
 
         private int RemoveBrokenItemImages(BaseItem item)
@@ -141,7 +166,15 @@ namespace MediaInfoKeeper.Options.View
 
         private static bool IsBrokenPath(string path)
         {
-            return !string.IsNullOrWhiteSpace(path) && !File.Exists(path);
+            return !string.IsNullOrWhiteSpace(path) &&
+                   !IsHttpUrl(path) &&
+                   !File.Exists(path);
+        }
+
+        private static bool IsHttpUrl(string path)
+        {
+            return path.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                   path.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

@@ -389,7 +389,10 @@ namespace MediaInfoKeeper.Patch
                 value = value.Substring(0, dashIndex);
             }
 
-            return value.ToLowerInvariant();
+            value = value.ToLowerInvariant();
+            return string.Equals(value, "cn", StringComparison.OrdinalIgnoreCase)
+                ? "zh"
+                : value;
         }
 
         private static string GetItemLabel(BaseItem item)

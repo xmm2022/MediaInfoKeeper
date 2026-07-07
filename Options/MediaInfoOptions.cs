@@ -42,8 +42,8 @@ namespace MediaInfoKeeper.Options
         [Description("发送到 X-Range-Cache-Prewarm-Key 的内部密钥，应与 range-cache-proxy 的 prewarm_api_key 一致。")]
         public string RangeCachePrewarmSecret { get; set; } = string.Empty;
 
-        [DisplayName("MediaInfo JSON 存储根目录")]
-        [Description("默认使用 Emby的 /config/data/MediaInfoKeeper 子目录保存。视频等媒体保存在 /your-path/FileNameWithoutExtension-mediainfo.json；音频保存在 /your-path/music/FileNameWithoutExtension-mediainfo.json。若当前值为空，JSON 保存到媒体文件同目录。")]
+        [DisplayName("MediaInfo JSON 存储路径模板")]
+        [Description("默认保存到 Emby 的 /config/data/MediaInfoKeeper。留空时保存到媒体文件同目录。支持路径模板，详见 https://github.com/honue/MediaInfoKeeper/wiki")]
         [EditFolderPicker]
         public string MediaInfoJsonRootFolder { get; set; } = GetDefaultMediaInfoJsonRootFolder();
 

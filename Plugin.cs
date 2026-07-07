@@ -396,21 +396,6 @@ namespace MediaInfoKeeper
             IntroScanRunner.Configure(safeOptions.IntroSkip.IntroDetectionMaxConcurrentCount);
         }
 
-        internal void UpdatePinyinSortNameLastProcessedAt(DateTimeOffset processedAt)
-        {
-            var options = this.OptionsStore.GetOptions();
-            options.Enhance ??= new EnhanceOptions();
-
-            var current = options.Enhance.PinyinSortNameLastProcessedAt;
-            if (current.HasValue && current.Value >= processedAt)
-            {
-                return;
-            }
-
-            options.Enhance.PinyinSortNameLastProcessedAt = processedAt;
-            this.OptionsStore.SetOptionsSilently(options);
-        }
-
         private void ConfigureStrmFileWatcher()
         {
             var safeOptions = this.OptionsStore.GetOptions() ?? new PluginConfiguration();
@@ -643,7 +628,7 @@ namespace MediaInfoKeeper
                     {
                         // 条目不在选定媒体库范围内。
                         this.logger.Info("跳过处理: 不在选定媒体库范围，不提取媒体信息");
-                        _ = MetaDataRunner.RefreshMetaDataAsync(itemId, priority: RefreshPriority.Highest, allowFfProcess:true);
+                        _ = MetaDataRunner.RefreshMetaDataAsync(itemId, priority: RefreshPriority.Highest, allowFfProcess: false);
                         return;
                     }
 
