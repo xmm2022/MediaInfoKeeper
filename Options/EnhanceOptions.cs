@@ -22,7 +22,7 @@ namespace MediaInfoKeeper.Options
             Caption = "重建数据库索引",
             CommandId = "enhance.optimizeDatabase",
             Icon = IconNames.settings_backup_restore,
-            ConfirmationPrompt = "将会按照设置重建增强搜索索引，清理数据库中指向不存在图片文件的裂图记录"
+            ConfirmationPrompt = "将会重建分词索引、排序名，并清理裂图记录"
         };
         
         [DisplayName("启用增强搜索")]
@@ -141,11 +141,8 @@ namespace MediaInfoKeeper.Options
         public bool HidePersonNoImage { get; set; } = false;
         
         [DisplayName("拼音首字母排序")]
-        [Description("自动把中文标题的 SortName 转成拼音首字母，并清理 A-Z 前缀分组。每次Emby启动时，会处理增量item的SortName。")]
+        [Description("中文标题按拼音首字母排序。已有条目可通过“重建数据库索引”更新。")]
         public bool EnablePinyinSortName { get; set; } = false;
-
-        [Browsable(false)]
-        public DateTimeOffset? PinyinSortNameLastProcessedAt { get; set; } = null;
 
         public enum HidePersonOption
         {

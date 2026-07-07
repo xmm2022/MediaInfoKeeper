@@ -393,21 +393,6 @@ namespace MediaInfoKeeper
             IntroScanRunner.Configure(safeOptions.IntroSkip.IntroDetectionMaxConcurrentCount);
         }
 
-        internal void UpdatePinyinSortNameLastProcessedAt(DateTimeOffset processedAt)
-        {
-            var options = this.OptionsStore.GetOptions();
-            options.Enhance ??= new EnhanceOptions();
-
-            var current = options.Enhance.PinyinSortNameLastProcessedAt;
-            if (current.HasValue && current.Value >= processedAt)
-            {
-                return;
-            }
-
-            options.Enhance.PinyinSortNameLastProcessedAt = processedAt;
-            this.OptionsStore.SetOptionsSilently(options);
-        }
-
         private void ConfigureStrmFileWatcher()
         {
             var safeOptions = this.OptionsStore.GetOptions() ?? new PluginConfiguration();

@@ -2,12 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Threading;
-using System.Threading.Tasks;
 using HarmonyLib;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
-using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Logging;
@@ -29,7 +26,6 @@ namespace MediaInfoKeeper.Patch
         private static MethodInfo getArtistPrefixesMethod;
         private static bool isEnabled;
         private static bool isPatched;
-        private static int backfillState;
 
         public static bool IsReady => harmony != null && (!isEnabled || isPatched);
 
@@ -141,12 +137,10 @@ namespace MediaInfoKeeper.Patch
             if (isEnabled)
             {
                 Patch();
-                EnsureSortNamesBackfilled();
             }
             else
             {
                 Unpatch();
-                Interlocked.Exchange(ref backfillState, 0);
             }
         }
 
@@ -167,7 +161,6 @@ namespace MediaInfoKeeper.Patch
                 getArtistPrefixesMethod,
                 postfix: new HarmonyMethod(typeof(PinyinSortName), nameof(GetPrefixesPostfix)));
             isPatched = true;
-            EnsureSortNamesBackfilled();
         }
 
         private static void Unpatch()
@@ -352,105 +345,17 @@ namespace MediaInfoKeeper.Patch
             return null;
         }
 
-        private static void EnsureSortNamesBackfilled()
+        public static bool RebuildSortName(BaseItem item)
         {
-            if (!isEnabled || Plugin.LibraryManager == null)
-            {
-                return;
-            }
-
-            if (Interlocked.CompareExchange(ref backfillState, 1, 0) != 0)
-            {
-                return;
-            }
-
-            _ = Task.Run(BackfillSortNamesAsync);
-        }
-
-        private static Task BackfillSortNamesAsync()
-        {
-            var startedAt = ConfiguredDateTime.NowOffset;
-
-            try
-            {
-                var checkpointAt = Plugin.Instance?.Options?.Enhance?.PinyinSortNameLastProcessedAt
-                    ?? DateTimeOffset.MinValue;
-                var query = new InternalItemsQuery
-                {
-                    Recursive = true,
-                    MinDateLastSaved = checkpointAt == DateTimeOffset.MinValue
-                        ? DateTimeOffset.MinValue
-                        : checkpointAt.AddSeconds(-1)
-                };
-
-                var candidates = Plugin.LibraryManager.GetItemList(query);
-                var candidateCount = candidates.Length;
-
-                var updatedCount = 0;
-                foreach (var item in candidates)
-                {
-                    if (!TryApplyPinyinSortName(item))
-                    {
-                        continue;
-                    }
-
-                    try
-                    {
-                        item.UpdateToRepository(ItemUpdateType.MetadataEdit);
-                        updatedCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        logger?.Warn("PinyinSortName 回写失败：{0} ({1})", item.Name, ex.Message);
-                    }
-                }
-
-                Plugin.Instance?.UpdatePinyinSortNameLastProcessedAt(startedAt);
-                if (updatedCount > 0)
-                {
-                    var checkpointLocal = checkpointAt == DateTimeOffset.MinValue
-                        ? DateTimeOffset.MinValue
-                        : ConfiguredDateTime.ToConfiguredOffset(checkpointAt);
-                    logger?.Info(
-                        "PinyinSortName 已同步排序名：候选 {0} 项，更新 {1} 项，时间起点 {2:O}。",
-                        candidateCount,
-                        updatedCount,
-                        checkpointLocal);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger?.Error("PinyinSortName 同步现有条目排序名失败。");
-                logger?.Error(ex.ToString());
-            }
-            finally
-            {
-                Interlocked.Exchange(ref backfillState, 0);
-            }
-
-            return Task.CompletedTask;
-        }
-
-        private static bool TryApplyPinyinSortName(BaseItem item)
-        {
-            if (!IsEligibleItem(item))
+            if (item == null || item.IsFieldLocked(MetadataFields.SortName))
             {
                 return false;
             }
 
-            var desiredSortName = BuildPinyinSortName(item, item.Name);
-            if (string.IsNullOrWhiteSpace(desiredSortName))
-            {
-                return false;
-            }
-
-            if (string.Equals(item.SortName, desiredSortName, StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            item.SortName = desiredSortName;
-            return true;
+            var currentSortName = item.SortName;
+            item.SortName = null;
+            var rebuiltSortName = item.SortName;
+            return !string.Equals(currentSortName, rebuiltSortName, StringComparison.Ordinal);
         }
 
         private static bool IsEligibleItem(BaseItem item)
