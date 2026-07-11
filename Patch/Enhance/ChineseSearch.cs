@@ -35,6 +35,7 @@ namespace MediaInfoKeeper.Patch
         private static MethodInfo getJoinCommandText;
         private static MethodInfo getJoinCommandTextExtended;
         private static MethodInfo createSearchTerm;
+        private static MethodInfo getValueForSearchColumn;
         private static MethodInfo cacheIdsFromTextParams;
 
         private static readonly object InitLock = new object();
@@ -196,6 +197,24 @@ namespace MediaInfoKeeper.Patch
                     {
                         LogMethodCandidates(sqliteItemRepository, "CreateSearchTerm");
                     }
+                    getValueForSearchColumn = PatchMethodResolver.Resolve(
+                        sqliteItemRepository,
+                        resolverVersion,
+                        new MethodSignatureProfile
+                        {
+                            Name = "sqliteitemrepository-getvalueforsearchcolumn-exact",
+                            MethodName = "GetValueForSearchColumn",
+                            BindingFlags = BindingFlags.NonPublic | BindingFlags.Instance,
+                            ParameterTypes = new[] { typeof(string) },
+                            ReturnType = typeof(string),
+                            IsStatic = false
+                        },
+                        logger,
+                        "ChineseSearch.GetValueForSearchColumn");
+                    if (getValueForSearchColumn == null)
+                    {
+                        LogMethodCandidates(sqliteItemRepository, "GetValueForSearchColumn");
+                    }
                     cacheIdsFromTextParams = PatchMethodResolver.Resolve(
                         sqliteItemRepository,
                         resolverVersion,
@@ -257,10 +276,11 @@ namespace MediaInfoKeeper.Patch
                     !PatchSearchFunctions())
                 {
                     logger?.Warn(
-                        "增强搜索 - 搜索函数补丁未安装，首字母拼音搜索可能无效。targets={0}; {1}; {2}; {3}",
+                        "增强搜索 - 搜索函数补丁未安装，首字母拼音搜索可能无效。targets={0}; {1}; {2}; {3}; {4}",
                         getJoinCommandText,
                         getJoinCommandTextExtended,
                         createSearchTerm,
+                        getValueForSearchColumn,
                         cacheIdsFromTextParams);
                 }
 
@@ -575,10 +595,11 @@ namespace MediaInfoKeeper.Patch
                     !PatchSearchFunctions())
                 {
                     logger?.Warn(
-                        "增强搜索 - 搜索函数补丁未安装，首字母拼音搜索可能无效。targets={0}; {1}; {2}; {3}",
+                        "增强搜索 - 搜索函数补丁未安装，首字母拼音搜索可能无效。targets={0}; {1}; {2}; {3}; {4}",
                         getJoinCommandText,
                         getJoinCommandTextExtended,
                         createSearchTerm,
+                        getValueForSearchColumn,
                         cacheIdsFromTextParams);
                     return false;
                 }
@@ -884,6 +905,16 @@ namespace MediaInfoKeeper.Patch
                 {
                     logger?.Warn("增强搜索 - 未安装 CreateSearchTerm patch：目标方法未找到。");
                 }
+                if (getValueForSearchColumn != null)
+                {
+                    harmony.Patch(getValueForSearchColumn,
+                        prefix: new HarmonyMethod(typeof(ChineseSearch), nameof(GetValueForSearchColumnPrefix)));
+                }
+                else
+                {
+                    logger?.Warn("增强搜索 - 未安装 GetValueForSearchColumn patch：目标方法未找到。");
+                    return false;
+                }
                 harmony.Patch(cacheIdsFromTextParams,
                     prefix: new HarmonyMethod(typeof(ChineseSearch), nameof(CacheIdsFromTextParamsPrefix)));
 
@@ -1079,6 +1110,7 @@ namespace MediaInfoKeeper.Patch
                 if (enhanceChineseSearchEnabled &&
                     string.Equals(CurrentTokenizerName, "simple", StringComparison.Ordinal))
                 {
+                    var normalizedSearchTerm = NormalizeSearchTerm(query.SearchTerm);
                     var replacement = excludeOriginalTitleFromSearch
                         ? "match '-OriginalTitle:' || simple_query(@SearchTerm)"
                         : "match simple_query(@SearchTerm)";
@@ -1097,7 +1129,7 @@ namespace MediaInfoKeeper.Patch
                             {
                                 bindParams[i] = new KeyValuePair<string, string>(
                                     bindParams[i].Key,
-                                    NormalizeSearchTerm(query.SearchTerm));
+                                    normalizedSearchTerm);
                                 break;
                             }
                         }
@@ -1150,6 +1182,19 @@ namespace MediaInfoKeeper.Patch
             }
 
             __result = NormalizeSearchTerm(searchTerm);
+            return false;
+        }
+
+        [HarmonyPrefix]
+        private static bool GetValueForSearchColumnPrefix(string value, ref string __result)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                __result = null;
+                return false;
+            }
+
+            __result = NormalizeSearchTerm(value);
             return false;
         }
 
