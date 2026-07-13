@@ -39,6 +39,7 @@ namespace MediaInfoKeeper.Patch
         private static ILogger logger;
         private static IActivityManager activityManager;
         private static string lastReportedFailureKey;
+        private static string lastOpSigningStatusKey;
 
         public static IReadOnlyCollection<PatchTracker> Trackers => trackers.AsReadOnly();
 
@@ -74,6 +75,7 @@ namespace MediaInfoKeeper.Patch
             lock (InitLock)
             {
                 var safeOptions = EnsureOptions(options);
+                ConfigureOpSignedUrlSigner(safeOptions);
 
                 foreach (var registration in registrations)
                 {
@@ -712,6 +714,41 @@ namespace MediaInfoKeeper.Patch
         private static bool IsPluginEnabled(PluginConfiguration options)
         {
             return options?.MainPage?.PlugginEnabled ?? true;
+        }
+
+        private static void ConfigureOpSignedUrlSigner(PluginConfiguration options)
+        {
+            var enhance = options?.Enhance ?? new EnhanceOptions();
+            var enabled = IsPluginEnabled(options) && enhance.EnableStrmDirectRedirectOpSigning;
+            var ready = OpSignedUrlSigner.Configure(
+                enabled,
+                enhance.StrmDirectRedirectOpKeyFile,
+                enhance.StrmDirectRedirectOpPublicBase,
+                enhance.StrmDirectRedirectOpLegacyHost,
+                enhance.StrmDirectRedirectOpTtlSeconds,
+                out var error);
+
+            var statusKey = enabled + "|" + ready + "|" + (error ?? string.Empty);
+            if (string.Equals(lastOpSigningStatusKey, statusKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            lastOpSigningStatusKey = statusKey;
+            if (!enabled)
+            {
+                logger?.Debug("OpSignedUrlSigner: 原生 op 签名已禁用");
+            }
+            else if (ready)
+            {
+                logger?.Info("OpSignedUrlSigner: 原生 op 签名已就绪");
+            }
+            else
+            {
+                logger?.Warn(
+                    "OpSignedUrlSigner: 原生 op 签名未就绪，将保留 src 交由现有签名桥回退。reason={0}",
+                    error ?? "unknown");
+            }
         }
 
         private static PluginConfiguration EnsureOptions(PluginConfiguration options)

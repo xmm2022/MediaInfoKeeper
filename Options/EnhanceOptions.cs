@@ -112,6 +112,30 @@ namespace MediaInfoKeeper.Options
         [VisibleCondition(nameof(EnableStrmAudioDirectRedirect), SimpleCondition.IsTrue)]
         public string StrmAudioDirectRedirectClientBlacklist { get; set; } = "Emby Web";
 
+        [DisplayName("原生生成 op 签名地址")]
+        [Description("仅对精确匹配 legacy src 的 Google/OpenList STRM 直链生成短期 op 地址。默认关闭；失败时保留原 URL，交给现有 Caddy 签名桥回退。")]
+        public bool EnableStrmDirectRedirectOpSigning { get; set; } = false;
+
+        [DisplayName("op Public Base")]
+        [Description("必须为无路径和查询串的 HTTPS origin。")]
+        [VisibleCondition(nameof(EnableStrmDirectRedirectOpSigning), SimpleCondition.IsTrue)]
+        public string StrmDirectRedirectOpPublicBase { get; set; } = "https://op.inemby.us.ci";
+
+        [DisplayName("legacy src Host")]
+        [Description("仅匹配该 host:port 的 HTTP STRM URL；tes、已有 op 和本地媒体不会签名。")]
+        [VisibleCondition(nameof(EnableStrmDirectRedirectOpSigning), SimpleCondition.IsTrue)]
+        public string StrmDirectRedirectOpLegacyHost { get; set; } = "src.inemby.us.ci:18080";
+
+        [DisplayName("op 签名 TTL（秒）")]
+        [Description("必须在 1 到 21600 秒之间；生产验证器当前上限为 6 小时。")]
+        [VisibleCondition(nameof(EnableStrmDirectRedirectOpSigning), SimpleCondition.IsTrue)]
+        public int StrmDirectRedirectOpTtlSeconds { get; set; } = 21600;
+
+        [DisplayName("op 签名 Key 文件")]
+        [Description("容器内只读 key 文件路径。不要把 key 内容写入插件配置。")]
+        [VisibleCondition(nameof(EnableStrmDirectRedirectOpSigning), SimpleCondition.IsTrue)]
+        public string StrmDirectRedirectOpKeyFile { get; set; } = "/run/secrets/emby-op-signing-key";
+
         [DisplayName("启用深度删除")]
         [Description("删除媒体时，尝试级联删除 STRM 或软链接目标文件及相关文件和空目录。")]
         public bool EnableDeepDelete { get; set; } = false;
@@ -326,7 +350,12 @@ namespace MediaInfoKeeper.Options
                 nameof(StrmVideoDirectRedirectClientBlacklist),
                 nameof(EnableStrmAudioDirectRedirect),
                 nameof(StrmAudioDirectRedirectFollow302),
-                nameof(StrmAudioDirectRedirectClientBlacklist));
+                nameof(StrmAudioDirectRedirectClientBlacklist),
+                nameof(EnableStrmDirectRedirectOpSigning),
+                nameof(StrmDirectRedirectOpPublicBase),
+                nameof(StrmDirectRedirectOpLegacyHost),
+                nameof(StrmDirectRedirectOpTtlSeconds),
+                nameof(StrmDirectRedirectOpKeyFile));
 
             AddGroup("深度删除", "",
                 nameof(EnableDeepDelete));

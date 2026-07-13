@@ -267,28 +267,24 @@ namespace MediaInfoKeeper.Patch
                 if (!StrmDirectRedirectUrlFilter.IsAllowed(originalUrl, urlAllowlist, urlBlocklist))
                 {
                     logger?.Info(
-                        "StrmVideoDirectRedirect: URL 未命中直连规则，回退 Emby 中转。itemId={0}, url={1}",
+                        "StrmVideoDirectRedirect: URL 未命中直连规则，回退 Emby 中转。itemId={0}, target={1}",
                         itemId,
-                        originalUrl);
+                        OpSignedUrlSigner.DescribeTarget(originalUrl));
                     DisposeState(state);
                     return true;
                 }
 
-                var redirectUrl = ResolveRedirectUrl(originalUrl, requestContext?.UserAgent);
-                var decodedRedirectUrl = redirectUrl;
-                if (!string.IsNullOrWhiteSpace(decodedRedirectUrl))
-                {
-                    try
-                    {
-                        decodedRedirectUrl = Uri.UnescapeDataString(decodedRedirectUrl);
-                    }
-                    catch
-                    {
-                    }
-                }
+                var nativeOpSigned = OpSignedUrlSigner.TryBuild(originalUrl, out var signedUrl);
+                var redirectUrl = nativeOpSigned
+                    ? signedUrl
+                    : ResolveRedirectUrl(originalUrl, requestContext?.UserAgent);
 
                 __result = Task.FromResult(resultFactory.GetRedirectResult(redirectUrl));
-                logger?.Info("StrmVideoDirectRedirect: itemId={0}, finalUrl={1}", itemId, decodedRedirectUrl);
+                logger?.Info(
+                    "StrmVideoDirectRedirect: itemId={0}, target={1}, nativeOpSigned={2}",
+                    itemId,
+                    OpSignedUrlSigner.DescribeTarget(redirectUrl),
+                    nativeOpSigned);
                 DisposeState(state);
                 return false;
             }

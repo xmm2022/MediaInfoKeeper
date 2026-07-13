@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="../../Common/GitHubUpdateSource.cs" Link="GitHubUpdateSource.cs" />
     <Compile Include="../../Options/Store/PluginOptionsJsonMigration.cs" Link="PluginOptionsJsonMigration.cs" />
+    <Compile Include="../../Patch/Enhance/OpSignedUrlSigner.cs" Link="OpSignedUrlSigner.cs" />
     <Compile Include="../../Patch/Enhance/StrmDirectRedirectUrlFilter.cs" Link="StrmDirectRedirectUrlFilter.cs" />
     <Compile Include="../../Services/RangeCachePrewarmRequest.cs" Link="RangeCachePrewarmRequest.cs" />
     <Compile Include="../../Services/RangeCachePrewarmTriggerPolicy.cs" Link="RangeCachePrewarmTriggerPolicy.cs" />

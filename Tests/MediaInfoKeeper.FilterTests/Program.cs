@@ -156,3 +156,123 @@ AssertTrue(
 AssertTrue(
     mixedEnhance["StrmVideoDirectRedirectFollow302"]!.GetValue<bool>(),
     "legacy STRM migration should not overwrite an explicit video follow-302 setting");
+
+var signingKey = Enumerable.Range(0, 32).Select(value => (byte)value).ToArray();
+var signingNonce = Enumerable.Range(0, 16).Select(value => (byte)value).ToArray();
+
+AssertTrue(
+    OpSignedUrlSigner.Builder.TryCreate(
+        signingKey,
+        "https://op.inemby.us.ci",
+        "src.inemby.us.ci:18080",
+        21600,
+        out var opBuilder,
+        out var opBuilderError),
+    "valid op signer configuration should be accepted: " + opBuilderError);
+
+const string goldenLegacyUrl =
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/%E4%B8%AD%E6%96%87%20a%2Bb%2525.mkv";
+const string goldenSignedUrl =
+    "https://op.inemby.us.ci/v1-canary/1783900000/000102030405060708090a0b0c0d0e0f/" +
+    "41157c0a4309dca49c2168ba5a5476746015eeebee41524000572d383f3208ac/" +
+    "google/audit/%E4%B8%AD%E6%96%87%20a%2Bb%2525.mkv";
+
+AssertTrue(
+    opBuilder!.TryBuild(goldenLegacyUrl, 1783878400, signingNonce, out var actualGoldenSignedUrl),
+    "valid src URL should produce an op signature");
+
+AssertTrue(
+    actualGoldenSignedUrl == goldenSignedUrl,
+    "C# signer should match the v2 HMAC-SHA256 golden vector");
+
+AssertTrue(
+    opBuilder.TryBuild(
+        "http://src.inemby.us.ci:18080/0123456789ABCDEF0123456789ABCDEF/openlist/audit/file.mkv",
+        1783878400,
+        signingNonce,
+        out var openListSignedUrl) &&
+    openListSignedUrl.Contains("/openlist/audit/file.mkv", StringComparison.Ordinal),
+    "openlist resources should be signed");
+
+foreach (var rejectedUrl in new[]
+{
+    "https://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/file.mkv",
+    "http://src.inemby.us.ci:18081/0123456789abcdef0123456789abcdef/google/audit/file.mkv",
+    "http://example.invalid:18080/0123456789abcdef0123456789abcdef/google/audit/file.mkv",
+    "http://src.inemby.us.ci:18080/google/audit/file.mkv",
+    "http://src.inemby.us.ci:18080/short/google/audit/file.mkv",
+    "http://src.inemby.us.ci:18080/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz/google/audit/file.mkv",
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/other/audit/file.mkv",
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/file.mkv?query=test-only",
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/file.mkv#fragment",
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/%2e%2e/file.mkv",
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/a%2Fb.mkv",
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/a%5Cb.mkv",
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/%ZZ.mkv",
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/%FF.mkv",
+    "https://tes.inemby.us.ci/archive/file.mkv",
+    "https://op.inemby.us.ci/v1-canary/already-signed"
+})
+{
+    AssertFalse(
+        opBuilder.TryBuild(rejectedUrl, 1783878400, signingNonce, out _),
+        "non-canonical or out-of-scope URL must not be signed: " +
+        OpSignedUrlSigner.DescribeTarget(rejectedUrl));
+}
+
+AssertTrue(
+    opBuilder.TryBuild(
+        "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit//file.mkv",
+        1783878400,
+        signingNonce,
+        out var repeatedSlashUrl) &&
+    repeatedSlashUrl.EndsWith("/google/audit//file.mkv", StringComparison.Ordinal),
+    "production signer preserves repeated slashes");
+
+AssertTrue(
+    opBuilder.TryBuild(
+        "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/",
+        1783878400,
+        signingNonce,
+        out var trailingSlashUrl) &&
+    trailingSlashUrl.EndsWith("/google/audit/", StringComparison.Ordinal),
+    "production signer preserves a trailing slash");
+
+AssertFalse(
+    OpSignedUrlSigner.Builder.TryCreate(
+        new byte[31],
+        "https://op.inemby.us.ci",
+        "src.inemby.us.ci:18080",
+        21600,
+        out _,
+        out _),
+    "keys that are not exactly 32 bytes must be rejected");
+
+AssertFalse(
+    OpSignedUrlSigner.Builder.TryCreate(
+        signingKey,
+        "https://op.inemby.us.ci/path",
+        "src.inemby.us.ci:18080",
+        21600,
+        out _,
+        out _),
+    "public base paths must be rejected");
+
+AssertFalse(
+    OpSignedUrlSigner.Builder.TryCreate(
+        signingKey,
+        "https://op.inemby.us.ci",
+        "src.inemby.us.ci:18080",
+        21601,
+        out _,
+        out _),
+    "TTL above the verifier max-future limit must be rejected");
+
+AssertTrue(
+    OpSignedUrlSigner.DescribeTarget(goldenSignedUrl) == "https://op.inemby.us.ci",
+    "redirect logging must omit the signed path");
+
+AssertTrue(
+    OpSignedUrlSigner.DescribeTarget("https://user:test-only@example.invalid:8443/path?query=test-only") ==
+        "https://example.invalid:8443",
+    "redirect logging must omit user info, path and query values");
