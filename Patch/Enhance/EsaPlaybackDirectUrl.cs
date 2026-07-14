@@ -329,11 +329,19 @@ namespace MediaInfoKeeper.Patch
                 return null;
             }
 
+            // Prefer the canonical Emby protocol header. Some clients (notably
+            // AfuseKt) decorate Session.Client with platform text containing a
+            // semicolon, which cannot be represented in the configured client
+            // list because semicolons are valid list separators.
+            var headerClient = requestContext.Headers?["X-Emby-Client"]?.Trim();
+            if (!string.IsNullOrWhiteSpace(headerClient))
+            {
+                return headerClient;
+            }
+
             var sessionContext = Plugin.Instance?.AppHost?.Resolve<ISessionContext>();
             var client = sessionContext?.GetSession(requestContext)?.Client?.Trim();
-            return string.IsNullOrWhiteSpace(client)
-                ? requestContext.Headers?["X-Emby-Client"]?.Trim()
-                : client;
+            return string.IsNullOrWhiteSpace(client) ? null : client;
         }
 
         private static T GetPropertyValue<T>(object target, string propertyName)
