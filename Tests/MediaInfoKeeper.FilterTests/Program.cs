@@ -291,6 +291,19 @@ AssertTrue(
     "C# signer should match the v2 HMAC-SHA256 golden vector");
 
 AssertTrue(
+    opBuilder.TryBuild(goldenLegacyUrl, out var firstReusableSignedUrl) &&
+    opBuilder.TryBuild(goldenLegacyUrl, out var secondReusableSignedUrl) &&
+    firstReusableSignedUrl == secondReusableSignedUrl,
+    "repeated Range requests for the same source should reuse one signed URL briefly");
+
+const string secondLegacyUrl =
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/google/audit/second-file.mkv";
+AssertTrue(
+    opBuilder.TryBuild(secondLegacyUrl, out var secondSourceSignedUrl) &&
+    secondSourceSignedUrl != firstReusableSignedUrl,
+    "different sources must not share a cached signed URL");
+
+AssertTrue(
     opBuilder.TryBuild(
         "http://src.inemby.us.ci:18080/0123456789ABCDEF0123456789ABCDEF/openlist/audit/file.mkv",
         1783878400,

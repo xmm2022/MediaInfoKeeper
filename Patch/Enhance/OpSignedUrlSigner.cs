@@ -1,6 +1,7 @@
 #nullable disable
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -20,12 +21,23 @@ namespace MediaInfoKeeper.Patch
             private const int KeyLength = 32;
             private const int NonceLength = 16;
             private const int MaximumTtlSeconds = 6 * 60 * 60;
+            private const int SignedUrlReuseSeconds = 30;
             private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
 
             private readonly byte[] key;
             private readonly string publicBase;
             private readonly string legacyAuthority;
             private readonly int ttlSeconds;
+            private readonly object signedUrlCacheLock = new object();
+            private readonly Dictionary<string, CachedSignedUrl> signedUrlCache =
+                new Dictionary<string, CachedSignedUrl>(StringComparer.Ordinal);
+
+            private sealed class CachedSignedUrl
+            {
+                internal string Url { get; set; }
+
+                internal long ReuseUntilUnixSeconds { get; set; }
+            }
 
             private Builder(byte[] keyBytes, string normalizedPublicBase, string normalizedLegacyAuthority, int ttl)
             {
@@ -76,17 +88,49 @@ namespace MediaInfoKeeper.Patch
 
             internal bool TryBuild(string legacyUrl, out string signedUrl)
             {
-                var nonce = new byte[NonceLength];
-                using (var random = RandomNumberGenerator.Create())
-                {
-                    random.GetBytes(nonce);
-                }
+                signedUrl = null;
+                var nowUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-                return TryBuild(
-                    legacyUrl,
-                    DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    nonce,
-                    out signedUrl);
+                lock (signedUrlCacheLock)
+                {
+                    if (signedUrlCache.TryGetValue(legacyUrl ?? string.Empty, out var cached) &&
+                        cached.ReuseUntilUnixSeconds > nowUnixSeconds)
+                    {
+                        signedUrl = cached.Url;
+                        return true;
+                    }
+
+                    foreach (var expiredKey in signedUrlCache
+                        .Where(pair => pair.Value.ReuseUntilUnixSeconds <= nowUnixSeconds)
+                        .Select(pair => pair.Key)
+                        .ToArray())
+                    {
+                        signedUrlCache.Remove(expiredKey);
+                    }
+
+                    var nonce = new byte[NonceLength];
+                    using (var random = RandomNumberGenerator.Create())
+                    {
+                        random.GetBytes(nonce);
+                    }
+
+                    if (!TryBuild(legacyUrl, nowUnixSeconds, nonce, out signedUrl))
+                    {
+                        return false;
+                    }
+
+                    var reuseSeconds = Math.Min(SignedUrlReuseSeconds, Math.Max(0, ttlSeconds - 1));
+                    if (reuseSeconds > 0)
+                    {
+                        signedUrlCache[legacyUrl] = new CachedSignedUrl
+                        {
+                            Url = signedUrl,
+                            ReuseUntilUnixSeconds = nowUnixSeconds + reuseSeconds
+                        };
+                    }
+
+                    return true;
+                }
             }
 
             internal bool TryBuild(string legacyUrl, long nowUnixSeconds, byte[] nonce, out string signedUrl)
