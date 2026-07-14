@@ -500,6 +500,28 @@ namespace MediaInfoKeeper.Patch
 
             registrations.Add(new PatchRegistration
             {
+                Name = "EsaPlaybackDirectUrl",
+                Initialize = options => EsaPlaybackDirectUrl.Initialize(
+                    logger,
+                    IsPluginEnabled(options) && options.Enhance.EnableEsaPlaybackDirectUrl,
+                    options.Enhance.EsaPlaybackDirectUrlBase,
+                    options.Enhance.EsaPlaybackDirectUrlClientAllowlist,
+                    IsPluginEnabled(options) && options.Enhance.EnableOpPlaybackDirectUrl,
+                    options.Enhance.OpPlaybackDirectUrlClientAllowlist),
+                Configure = options => EsaPlaybackDirectUrl.Configure(
+                    IsPluginEnabled(options) && options.Enhance.EnableEsaPlaybackDirectUrl,
+                    options.Enhance.EsaPlaybackDirectUrlBase,
+                    options.Enhance.EsaPlaybackDirectUrlClientAllowlist,
+                    IsPluginEnabled(options) && options.Enhance.EnableOpPlaybackDirectUrl,
+                    options.Enhance.OpPlaybackDirectUrlClientAllowlist),
+                IsEnabled = options => IsPluginEnabled(options) &&
+                    (options.Enhance.EnableEsaPlaybackDirectUrl || options.Enhance.EnableOpPlaybackDirectUrl),
+                IsReady = () => EsaPlaybackDirectUrl.IsReady,
+                Notes = () => "protected ESA/OP marker + exact client allowlist + direct-play STRM only"
+            });
+
+            registrations.Add(new PatchRegistration
+            {
                 Name = "DeepDelete",
                 Initialize = options => DeepDelete.Initialize(logger, options.Enhance.EnableDeepDelete),
                 Configure = options => DeepDelete.Configure(IsPluginEnabled(options) && options.Enhance.EnableDeepDelete),

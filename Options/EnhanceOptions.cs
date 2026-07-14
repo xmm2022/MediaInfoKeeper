@@ -136,6 +136,29 @@ namespace MediaInfoKeeper.Options
         [VisibleCondition(nameof(EnableStrmDirectRedirectOpSigning), SimpleCondition.IsTrue)]
         public string StrmDirectRedirectOpKeyFile { get; set; } = "/run/secrets/emby-op-signing-key";
 
+        [DisplayName("ESA PlaybackInfo 直链（实验）")]
+        [Description("仅对带受保护 ESA 入口标记、命中客户端白名单且可直放的远端 STRM 生效。把 PlaybackInfo 的 DirectStreamUrl 直接改为 ESA 签名地址，避免播放器每段 Range 再经过 Emby 302。默认关闭。")]
+        public bool EnableEsaPlaybackDirectUrl { get; set; } = false;
+
+        [DisplayName("ESA Stream Base")]
+        [Description("独立 canary ESA 入口的 HTTPS /stream 地址，例如 https://esa-canary.example.com/stream。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string EsaPlaybackDirectUrlBase { get; set; } = string.Empty;
+
+        [DisplayName("ESA 直链客户端白名单")]
+        [Description("按 Emby 客户端名称精确匹配；支持逗号、分号或换行分隔。实验阶段建议仅填写 Hills。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string EsaPlaybackDirectUrlClientAllowlist { get; set; } = "Hills";
+
+        [DisplayName("OP PlaybackInfo 直链（实验）")]
+        [Description("仅对带受保护 OP Direct 入口标记、命中客户端白名单且可直放的远端 STRM 生效。直接返回原生签名 OP 地址，不经过 ESA 媒体代理或 Emby 302。默认关闭。")]
+        public bool EnableOpPlaybackDirectUrl { get; set; } = false;
+
+        [DisplayName("OP 直链客户端白名单")]
+        [Description("按 Emby 客户端名称精确匹配；支持逗号、分号或换行分隔。实验阶段建议仅填写 Hills。")]
+        [VisibleCondition(nameof(EnableOpPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string OpPlaybackDirectUrlClientAllowlist { get; set; } = "Hills";
+
         [DisplayName("启用深度删除")]
         [Description("删除媒体时，尝试级联删除 STRM 或软链接目标文件及相关文件和空目录。")]
         public bool EnableDeepDelete { get; set; } = false;

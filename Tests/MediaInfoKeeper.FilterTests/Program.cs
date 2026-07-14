@@ -17,6 +17,93 @@ static void AssertFalse(bool condition, string message)
     AssertTrue(!condition, message);
 }
 
+var esaClients = EsaPlaybackDirectUrlPolicy.ParseClients("Hills; Infuse");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.IsRequestEligible(true, "1", "Hills", esaClients),
+    "ESA PlaybackInfo direct URL should require the protected marker and an exact client match");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.IsRequestEligible(true, null, "Hills", esaClients),
+    "ESA PlaybackInfo direct URL must not run without the protected marker");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.IsRequestEligible(true, "1", "Hills Mobile", esaClients),
+    "ESA PlaybackInfo client matching must be exact, not a substring match");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.IsRequestEligible(false, "1", "Hills", esaClients),
+    "ESA PlaybackInfo direct URL must honor the feature switch");
+
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.ResolveMode(
+        true,
+        "1",
+        esaClients,
+        true,
+        null,
+        esaClients,
+        "Hills") == PlaybackDirectUrlMode.Esa,
+    "the ESA marker should select only the ESA output mode");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.ResolveMode(
+        true,
+        null,
+        esaClients,
+        true,
+        "1",
+        esaClients,
+        "Hills") == PlaybackDirectUrlMode.Op,
+    "the OP Direct marker should select only the native OP output mode");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.ResolveMode(
+        true,
+        "1",
+        esaClients,
+        true,
+        "1",
+        esaClients,
+        "Hills") == PlaybackDirectUrlMode.None,
+    "ambiguous requests carrying both protected markers must fail closed");
+
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.TryRebaseSignedUrl(
+        "https://esa-canary.822211.xyz/stream/",
+        "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out var rebasedEsaUrl),
+    "a canonical signed op path should rebase onto the dedicated ESA stream namespace");
+AssertTrue(
+    rebasedEsaUrl ==
+        "https://esa-canary.822211.xyz/stream/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+    "ESA URL rebasing should preserve the full signed path");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.TryRebaseSignedUrl(
+        "https://esa-canary.822211.xyz/control",
+        "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out _),
+    "ESA direct URL must be confined to the /stream namespace");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.TryRebaseSignedUrl(
+        "http://esa-canary.822211.xyz/stream",
+        "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out _),
+    "ESA direct URL must require HTTPS");
+
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.TryBuildOutputUrl(
+        PlaybackDirectUrlMode.Op,
+        null,
+        "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out var directOpUrl),
+    "OP Direct mode should accept a canonical HTTPS signed path");
+AssertTrue(
+    directOpUrl ==
+        "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+    "OP Direct mode must preserve the signer output without rebasing it");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.TryBuildOutputUrl(
+        PlaybackDirectUrlMode.Op,
+        null,
+        "https://op.inemby.us.ci/not-signed/file.mkv",
+        out _),
+    "OP Direct mode must reject paths outside the signed namespace");
+
 var allowlist = StrmDirectRedirectUrlFilter.ParsePatterns(
     "http://82.47.35.45:5244/; http://example.test/media/");
 var blocklist = StrmDirectRedirectUrlFilter.ParsePatterns(
