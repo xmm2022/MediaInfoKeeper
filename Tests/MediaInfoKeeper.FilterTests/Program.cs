@@ -31,6 +31,14 @@ AssertFalse(
     EsaPlaybackDirectUrlPolicy.IsRequestEligible(false, "1", "Hills", esaClients),
     "ESA PlaybackInfo direct URL must honor the feature switch");
 
+var allClients = EsaPlaybackDirectUrlPolicy.ParseClients("*");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.IsRequestEligible(true, "1", null, allClients),
+    "the explicit wildcard should allow every client through a protected ESA entry");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.IsRequestEligible(true, null, null, allClients),
+    "the wildcard must not bypass the protected ESA marker");
+
 AssertTrue(
     EsaPlaybackDirectUrlPolicy.ResolveMode(
         true,
@@ -61,6 +69,16 @@ AssertTrue(
         esaClients,
         "Hills") == PlaybackDirectUrlMode.None,
     "ambiguous requests carrying both protected markers must fail closed");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.ResolveMode(
+        true,
+        "1",
+        allClients,
+        true,
+        "1",
+        esaClients,
+        "AfuseKt") == PlaybackDirectUrlMode.None,
+    "ambiguous marker requests must fail closed even when only one client policy matches");
 
 AssertTrue(
     EsaPlaybackDirectUrlPolicy.TryRebaseSignedUrl(

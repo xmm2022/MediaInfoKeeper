@@ -36,10 +36,20 @@ namespace MediaInfoKeeper.Patch
             string client,
             string[] allowedClients)
         {
-            return enabled &&
-                string.Equals(markerValue?.Trim(), MarkerValue, StringComparison.Ordinal) &&
-                !string.IsNullOrWhiteSpace(client) &&
-                allowedClients != null &&
+            if (!enabled ||
+                !string.Equals(markerValue?.Trim(), MarkerValue, StringComparison.Ordinal) ||
+                allowedClients == null)
+            {
+                return false;
+            }
+
+            if (allowedClients.Any(item =>
+                string.Equals(item, "*", StringComparison.Ordinal)))
+            {
+                return true;
+            }
+
+            return !string.IsNullOrWhiteSpace(client) &&
                 allowedClients.Any(item =>
                     string.Equals(item, client.Trim(), StringComparison.OrdinalIgnoreCase));
         }
@@ -53,6 +63,15 @@ namespace MediaInfoKeeper.Patch
             string[] opAllowedClients,
             string client)
         {
+            var esaMarked = esaEnabled &&
+                string.Equals(esaMarkerValue?.Trim(), MarkerValue, StringComparison.Ordinal);
+            var opMarked = opEnabled &&
+                string.Equals(opMarkerValue?.Trim(), MarkerValue, StringComparison.Ordinal);
+            if (esaMarked && opMarked)
+            {
+                return PlaybackDirectUrlMode.None;
+            }
+
             var esaEligible = IsRequestEligible(
                 esaEnabled,
                 esaMarkerValue,
