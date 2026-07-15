@@ -133,6 +133,20 @@ namespace MediaInfoKeeper.Patch
                 }
             }
 
+            internal bool TryBuildUnsignedResourcePath(
+                string legacyUrl,
+                out string resourcePath)
+            {
+                resourcePath = null;
+                if (!TryExtractNormalizedResource(legacyUrl, legacyAuthority, out var resource))
+                {
+                    return false;
+                }
+
+                resourcePath = EscapeResource(resource);
+                return true;
+            }
+
             internal bool TryBuild(string legacyUrl, long nowUnixSeconds, byte[] nonce, out string signedUrl)
             {
                 signedUrl = null;
@@ -481,6 +495,16 @@ namespace MediaInfoKeeper.Patch
             signedUrl = null;
             var builder = Interlocked.CompareExchange(ref current, null, null);
             return builder != null && builder.TryBuild(legacyUrl, out signedUrl);
+        }
+
+        internal static bool TryBuildUnsignedResourcePath(
+            string legacyUrl,
+            out string resourcePath)
+        {
+            resourcePath = null;
+            var builder = Interlocked.CompareExchange(ref current, null, null);
+            return builder != null &&
+                builder.TryBuildUnsignedResourcePath(legacyUrl, out resourcePath);
         }
 
         internal static string DescribeTarget(string url)

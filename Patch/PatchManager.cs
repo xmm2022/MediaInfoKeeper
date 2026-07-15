@@ -467,13 +467,25 @@ namespace MediaInfoKeeper.Patch
                     options.Enhance.StrmVideoDirectRedirectFollow302,
                     options.Enhance.StrmDirectRedirectUrlAllowlist,
                     options.Enhance.StrmDirectRedirectUrlBlocklist,
-                    options.Enhance.StrmVideoDirectRedirectClientBlacklist),
+                    options.Enhance.StrmVideoDirectRedirectClientBlacklist,
+                    options.Enhance.EnableEsaPlaybackDirectUrl,
+                    options.Enhance.EoPlaybackDirectUrlBase,
+                    options.Enhance.EsaPlaybackDirectUrlClientAllowlist,
+                    options.Enhance.EnableMainPlaybackDirectUrl,
+                    options.Enhance.MainPlaybackDirectUrlBase,
+                    options.Enhance.MainPlaybackDirectUrlClientAllowlist),
                 Configure = options => StrmVideoDirectRedirect.Configure(
                     IsPluginEnabled(options) && options.Enhance.EnableStrmVideoDirectRedirect,
                     options.Enhance.StrmVideoDirectRedirectFollow302,
                     options.Enhance.StrmDirectRedirectUrlAllowlist,
                     options.Enhance.StrmDirectRedirectUrlBlocklist,
-                    options.Enhance.StrmVideoDirectRedirectClientBlacklist),
+                    options.Enhance.StrmVideoDirectRedirectClientBlacklist,
+                    IsPluginEnabled(options) && options.Enhance.EnableEsaPlaybackDirectUrl,
+                    options.Enhance.EoPlaybackDirectUrlBase,
+                    options.Enhance.EsaPlaybackDirectUrlClientAllowlist,
+                    IsPluginEnabled(options) && options.Enhance.EnableMainPlaybackDirectUrl,
+                    options.Enhance.MainPlaybackDirectUrlBase,
+                    options.Enhance.MainPlaybackDirectUrlClientAllowlist),
                 IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmVideoDirectRedirect,
                 IsReady = () => StrmVideoDirectRedirect.IsReady
             });
@@ -505,19 +517,35 @@ namespace MediaInfoKeeper.Patch
                     logger,
                     IsPluginEnabled(options) && options.Enhance.EnableEsaPlaybackDirectUrl,
                     options.Enhance.EsaPlaybackDirectUrlBase,
+                    options.Enhance.CacheFlyPlaybackDirectUrlBase,
+                    options.Enhance.CacheFlyHlsPlaybackBase,
+                    options.Enhance.CacheFlyProtectServeKeyFile,
+                    options.Enhance.EoPlaybackDirectUrlBase,
                     options.Enhance.EsaPlaybackDirectUrlClientAllowlist,
                     IsPluginEnabled(options) && options.Enhance.EnableOpPlaybackDirectUrl,
-                    options.Enhance.OpPlaybackDirectUrlClientAllowlist),
+                    options.Enhance.OpPlaybackDirectUrlClientAllowlist,
+                    IsPluginEnabled(options) && options.Enhance.EnableMainPlaybackDirectUrl,
+                    options.Enhance.MainPlaybackDirectUrlBase,
+                    options.Enhance.MainPlaybackDirectUrlClientAllowlist),
                 Configure = options => EsaPlaybackDirectUrl.Configure(
                     IsPluginEnabled(options) && options.Enhance.EnableEsaPlaybackDirectUrl,
                     options.Enhance.EsaPlaybackDirectUrlBase,
+                    options.Enhance.CacheFlyPlaybackDirectUrlBase,
+                    options.Enhance.CacheFlyHlsPlaybackBase,
+                    options.Enhance.CacheFlyProtectServeKeyFile,
+                    options.Enhance.EoPlaybackDirectUrlBase,
                     options.Enhance.EsaPlaybackDirectUrlClientAllowlist,
                     IsPluginEnabled(options) && options.Enhance.EnableOpPlaybackDirectUrl,
-                    options.Enhance.OpPlaybackDirectUrlClientAllowlist),
+                    options.Enhance.OpPlaybackDirectUrlClientAllowlist,
+                    IsPluginEnabled(options) && options.Enhance.EnableMainPlaybackDirectUrl,
+                    options.Enhance.MainPlaybackDirectUrlBase,
+                    options.Enhance.MainPlaybackDirectUrlClientAllowlist),
                 IsEnabled = options => IsPluginEnabled(options) &&
-                    (options.Enhance.EnableEsaPlaybackDirectUrl || options.Enhance.EnableOpPlaybackDirectUrl),
+                    (options.Enhance.EnableEsaPlaybackDirectUrl ||
+                     options.Enhance.EnableOpPlaybackDirectUrl ||
+                     options.Enhance.EnableMainPlaybackDirectUrl),
                 IsReady = () => EsaPlaybackDirectUrl.IsReady,
-                Notes = () => "protected ESA/OP marker + exact client allowlist + direct-play STRM only"
+                Notes = () => "protected ESA/CacheFly/EO/OP/Main marker + exact client allowlist; optional signed CacheFly HLS remux"
             });
 
             registrations.Add(new PatchRegistration

@@ -9,13 +9,21 @@ namespace MediaInfoKeeper.Patch
     {
         None,
         Esa,
-        Op
+        CacheFly,
+        CacheFlyHls,
+        Eo,
+        Op,
+        Main
     }
 
     internal static class EsaPlaybackDirectUrlPolicy
     {
         internal const string MarkerHeader = "X-Esa-Proxy-Entry";
+        internal const string CacheFlyMarkerHeader = "X-CacheFly-Canary-Entry";
+        internal const string CacheFlyHlsMarkerHeader = "X-CacheFly-Hls-Canary-Entry";
+        internal const string EoMarkerHeader = "X-Eo-Canary-Entry";
         internal const string OpMarkerHeader = "X-Op-Direct-Entry";
+        internal const string MainMarkerHeader = "X-Main-Unified-Entry";
         internal const string MarkerValue = "1";
 
         internal static string[] ParseClients(string text)
@@ -57,24 +65,79 @@ namespace MediaInfoKeeper.Patch
         internal static PlaybackDirectUrlMode ResolveMode(
             bool esaEnabled,
             string esaMarkerValue,
+            string cacheFlyMarkerValue,
+            string cacheFlyHlsMarkerValue,
+            string eoMarkerValue,
             string[] esaAllowedClients,
             bool opEnabled,
             string opMarkerValue,
             string[] opAllowedClients,
             string client)
         {
+            return ResolveMode(
+                esaEnabled,
+                esaMarkerValue,
+                cacheFlyMarkerValue,
+                cacheFlyHlsMarkerValue,
+                eoMarkerValue,
+                esaAllowedClients,
+                opEnabled,
+                opMarkerValue,
+                opAllowedClients,
+                false,
+                null,
+                Array.Empty<string>(),
+                client);
+        }
+
+        internal static PlaybackDirectUrlMode ResolveMode(
+            bool esaEnabled,
+            string esaMarkerValue,
+            string cacheFlyMarkerValue,
+            string cacheFlyHlsMarkerValue,
+            string eoMarkerValue,
+            string[] esaAllowedClients,
+            bool opEnabled,
+            string opMarkerValue,
+            string[] opAllowedClients,
+            bool mainEnabled,
+            string mainMarkerValue,
+            string[] mainAllowedClients,
+            string client)
+        {
             var esaMarked = esaEnabled &&
                 string.Equals(esaMarkerValue?.Trim(), MarkerValue, StringComparison.Ordinal);
+            var cacheFlyMarked = esaEnabled &&
+                string.Equals(cacheFlyMarkerValue?.Trim(), MarkerValue, StringComparison.Ordinal);
+            var cacheFlyHlsMarked = esaEnabled &&
+                string.Equals(cacheFlyHlsMarkerValue?.Trim(), MarkerValue, StringComparison.Ordinal);
+            var eoMarked = esaEnabled &&
+                string.Equals(eoMarkerValue?.Trim(), MarkerValue, StringComparison.Ordinal);
             var opMarked = opEnabled &&
                 string.Equals(opMarkerValue?.Trim(), MarkerValue, StringComparison.Ordinal);
-            if (esaMarked && opMarked)
+            var mainMarked = mainEnabled &&
+                string.Equals(mainMarkerValue?.Trim(), MarkerValue, StringComparison.Ordinal);
+            var markedCount = (esaMarked ? 1 : 0) +
+                (cacheFlyMarked ? 1 : 0) +
+                (cacheFlyHlsMarked ? 1 : 0) +
+                (eoMarked ? 1 : 0) +
+                (opMarked ? 1 : 0) +
+                (mainMarked ? 1 : 0);
+            if (markedCount != 1)
             {
                 return PlaybackDirectUrlMode.None;
             }
 
-            var esaEligible = IsRequestEligible(
+            var providerMarkerValue = esaMarked
+                ? esaMarkerValue
+                : cacheFlyMarked
+                    ? cacheFlyMarkerValue
+                    : cacheFlyHlsMarked
+                        ? cacheFlyHlsMarkerValue
+                        : eoMarkerValue;
+            var providerEligible = IsRequestEligible(
                 esaEnabled,
-                esaMarkerValue,
+                providerMarkerValue,
                 client,
                 esaAllowedClients);
             var opEligible = IsRequestEligible(
@@ -82,15 +145,37 @@ namespace MediaInfoKeeper.Patch
                 opMarkerValue,
                 client,
                 opAllowedClients);
+            var mainEligible = IsRequestEligible(
+                mainEnabled,
+                mainMarkerValue,
+                client,
+                mainAllowedClients);
 
-            if (esaEligible == opEligible)
+            var eligibleCount = (providerEligible ? 1 : 0) +
+                (opEligible ? 1 : 0) +
+                (mainEligible ? 1 : 0);
+            if (eligibleCount != 1)
             {
                 return PlaybackDirectUrlMode.None;
             }
 
-            return opEligible
-                ? PlaybackDirectUrlMode.Op
-                : PlaybackDirectUrlMode.Esa;
+            if (mainEligible)
+            {
+                return PlaybackDirectUrlMode.Main;
+            }
+
+            if (opEligible)
+            {
+                return PlaybackDirectUrlMode.Op;
+            }
+
+            return cacheFlyHlsMarked
+                ? PlaybackDirectUrlMode.CacheFlyHls
+                : cacheFlyMarked
+                    ? PlaybackDirectUrlMode.CacheFly
+                    : eoMarked
+                        ? PlaybackDirectUrlMode.Eo
+                        : PlaybackDirectUrlMode.Esa;
         }
 
         internal static bool TryBuildOutputUrl(
@@ -111,7 +196,7 @@ namespace MediaInfoKeeper.Patch
                 return true;
             }
 
-            return mode == PlaybackDirectUrlMode.Esa &&
+            return mode != PlaybackDirectUrlMode.None &&
                 TryRebaseSignedUrl(esaStreamBase, signedUri.AbsoluteUri, out outputUrl);
         }
 
@@ -131,6 +216,52 @@ namespace MediaInfoKeeper.Patch
             return true;
         }
 
+        internal static bool IsUnsignedEoStreamBase(string text)
+        {
+            return TryNormalizeUnsignedEoStreamBase(text, out _);
+        }
+
+        internal static bool TryBuildUnsignedEoUrl(
+            string eoStreamBase,
+            string resourcePath,
+            out string eoUrl)
+        {
+            eoUrl = null;
+            if (!TryNormalizeUnsignedEoStreamBase(eoStreamBase, out var normalizedBase) ||
+                !IsAllowedUnsignedResourcePath(resourcePath))
+            {
+                return false;
+            }
+
+            eoUrl = normalizedBase + resourcePath;
+            return true;
+        }
+
+        internal static bool TryBuildProtectedOriginalRedirectUrl(
+            PlaybackDirectUrlMode mode,
+            string eoStreamBase,
+            string mainStreamBase,
+            string signedOpUrl,
+            string unsignedResourcePath,
+            out string outputUrl)
+        {
+            outputUrl = null;
+            if (mode == PlaybackDirectUrlMode.Eo)
+            {
+                return TryBuildUnsignedEoUrl(
+                    eoStreamBase,
+                    unsignedResourcePath,
+                    out outputUrl);
+            }
+
+            return mode == PlaybackDirectUrlMode.Main &&
+                TryBuildOutputUrl(
+                    PlaybackDirectUrlMode.Main,
+                    mainStreamBase,
+                    signedOpUrl,
+                    out outputUrl);
+        }
+
         private static bool TryNormalizeStreamBase(string text, out string normalized)
         {
             normalized = null;
@@ -140,13 +271,76 @@ namespace MediaInfoKeeper.Patch
                 !string.IsNullOrEmpty(uri.UserInfo) ||
                 !string.IsNullOrEmpty(uri.Query) ||
                 !string.IsNullOrEmpty(uri.Fragment) ||
-                !string.Equals(uri.AbsolutePath.TrimEnd('/'), "/stream", StringComparison.Ordinal))
+                !IsAllowedStreamPath(uri.AbsolutePath.TrimEnd('/')))
             {
                 return false;
             }
 
-            normalized = uri.GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/stream";
+            normalized = uri.GetLeftPart(UriPartial.Authority).TrimEnd('/') +
+                uri.AbsolutePath.TrimEnd('/');
             return true;
+        }
+
+        private static bool IsAllowedStreamPath(string path)
+        {
+            return string.Equals(path, "/stream", StringComparison.Ordinal) ||
+                string.Equals(path, "/cachefly-stream", StringComparison.Ordinal) ||
+                string.Equals(path, "/eo-stream", StringComparison.Ordinal) ||
+                string.Equals(path, "/main-stream", StringComparison.Ordinal);
+        }
+
+        private static bool TryNormalizeUnsignedEoStreamBase(
+            string text,
+            out string normalized)
+        {
+            normalized = null;
+            if (!Uri.TryCreate(text?.Trim(), UriKind.Absolute, out var uri) ||
+                !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(uri.Host) ||
+                !string.IsNullOrEmpty(uri.UserInfo) ||
+                !string.IsNullOrEmpty(uri.Query) ||
+                !string.IsNullOrEmpty(uri.Fragment))
+            {
+                return false;
+            }
+
+            var path = uri.AbsolutePath.TrimEnd('/');
+            const string prefix = "/eo-stream/u-";
+            if (!path.StartsWith(prefix, StringComparison.Ordinal) ||
+                path.Length != prefix.Length + 32)
+            {
+                return false;
+            }
+
+            for (var index = prefix.Length; index < path.Length; index++)
+            {
+                var value = path[index];
+                if (!((value >= '0' && value <= '9') ||
+                      (value >= 'a' && value <= 'f')))
+                {
+                    return false;
+                }
+            }
+
+            normalized = uri.GetLeftPart(UriPartial.Authority).TrimEnd('/') + path;
+            return true;
+        }
+
+        private static bool IsAllowedUnsignedResourcePath(string path)
+        {
+            if (string.IsNullOrEmpty(path) ||
+                (!path.StartsWith("/google/", StringComparison.Ordinal) &&
+                 !path.StartsWith("/openlist/", StringComparison.Ordinal)) ||
+                path.IndexOfAny(new[] { '?', '#', '\\' }) >= 0 ||
+                path.Any(char.IsControl))
+            {
+                return false;
+            }
+
+            var segments = path.Split('/');
+            return !segments.Any(segment =>
+                string.Equals(segment, ".", StringComparison.Ordinal) ||
+                string.Equals(segment, "..", StringComparison.Ordinal));
         }
 
         private static bool TryParseSignedOpUrl(string text, out Uri signedUri)

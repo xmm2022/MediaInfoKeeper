@@ -43,6 +43,9 @@ AssertTrue(
     EsaPlaybackDirectUrlPolicy.ResolveMode(
         true,
         "1",
+        null,
+        null,
+        null,
         esaClients,
         true,
         null,
@@ -52,6 +55,9 @@ AssertTrue(
 AssertTrue(
     EsaPlaybackDirectUrlPolicy.ResolveMode(
         true,
+        null,
+        null,
+        null,
         null,
         esaClients,
         true,
@@ -63,6 +69,9 @@ AssertTrue(
     EsaPlaybackDirectUrlPolicy.ResolveMode(
         true,
         "1",
+        null,
+        null,
+        null,
         esaClients,
         true,
         "1",
@@ -73,12 +82,150 @@ AssertTrue(
     EsaPlaybackDirectUrlPolicy.ResolveMode(
         true,
         "1",
+        null,
+        null,
+        null,
         allClients,
         true,
         "1",
         esaClients,
         "AfuseKt") == PlaybackDirectUrlMode.None,
     "ambiguous marker requests must fail closed even when only one client policy matches");
+
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.ResolveMode(
+        true,
+        null,
+        "1",
+        null,
+        null,
+        allClients,
+        true,
+        null,
+        allClients,
+        "CapyPlayer") == PlaybackDirectUrlMode.CacheFly,
+    "the protected CacheFly marker should select the isolated CacheFly output mode");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.ResolveMode(
+        true,
+        null,
+        null,
+        null,
+        "1",
+        allClients,
+        true,
+        null,
+        allClients,
+        "Yamby") == PlaybackDirectUrlMode.Eo,
+    "the protected EO marker should select the isolated EO output mode");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.ResolveMode(
+        true,
+        null,
+        "1",
+        "1",
+        null,
+        allClients,
+        true,
+        null,
+        allClients,
+        "Hills") == PlaybackDirectUrlMode.None,
+    "requests carrying both CDN canary markers must fail closed");
+
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.ResolveMode(
+        true,
+        null,
+        null,
+        "1",
+        null,
+        allClients,
+        true,
+        null,
+        allClients,
+        "CapyPlayer") == PlaybackDirectUrlMode.CacheFlyHls,
+    "the protected CacheFly HLS marker should select only the HLS canary mode");
+
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.ResolveMode(
+        true,
+        null,
+        null,
+        null,
+        null,
+        allClients,
+        true,
+        null,
+        allClients,
+        true,
+        "1",
+        allClients,
+        "Hills") == PlaybackDirectUrlMode.Main,
+    "the protected Main marker should select only the same-host main output mode");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.ResolveMode(
+        true,
+        null,
+        null,
+        null,
+        "1",
+        allClients,
+        true,
+        null,
+        allClients,
+        true,
+        "1",
+        allClients,
+        "Hills") == PlaybackDirectUrlMode.None,
+    "requests carrying both EO and Main markers must fail closed");
+
+AssertTrue(
+    CacheFlyProtectServeSigner.Builder.TryCreate(
+        "c2VjcmV0LWNhbmFyeS1rZXk=",
+        "https://example.cachefly.net/cachefly-hls",
+        21600,
+        out var protectServeBuilder,
+        out _),
+    "a canonical CacheFly HLS base and ProtectServe key should configure the signer");
+AssertTrue(
+    protectServeBuilder.TryBuild(
+        "/videos/60844/master.m3u8?DeviceProfileId=cachefly-hls-canary&DeviceId=device-a&MediaSourceId=mediasource_60844&PlaySessionId=session-a&api_key=token-a&AudioStreamIndex=1&SegmentLength=6",
+        "60844",
+        1783900000,
+        out var protectedHlsA,
+        out var renditionA),
+    "the signer should accept Emby's relative HLS master URL");
+AssertTrue(
+    protectServeBuilder.TryBuild(
+        "/videos/60844/master.m3u8?SegmentLength=6&api_key=token-b&PlaySessionId=session-b&MediaSourceId=mediasource_60844&DeviceId=device-b&AudioStreamIndex=1&DeviceProfileId=cachefly-hls-canary",
+        "60844",
+        1783900000,
+        out var protectedHlsB,
+        out var renditionB),
+    "a later playback session should produce another valid signed HLS URL");
+AssertTrue(
+    renditionA == renditionB,
+    "session, device and API token changes must reuse the same rendition cache path");
+AssertTrue(
+    protectedHlsA.Contains("/Protected/expiretime=1783921600;dirmatch=true;sp=1/") &&
+    protectedHlsA.Contains("/cachefly-hls/r/" + renditionA + "/videos/60844/master.m3u8?"),
+    "the ProtectServe URL must sign the rendition directory and retain Emby's query string");
+AssertTrue(
+    protectServeBuilder.TryBuild(
+        "/videos/60844/master.m3u8?DeviceProfileId=cachefly-hls-canary&MediaSourceId=mediasource_60844&PlaySessionId=session-c&api_key=token-c&AudioStreamIndex=2&SegmentLength=6",
+        "60844",
+        1783900000,
+        out _,
+        out var renditionC) && renditionC != renditionA,
+    "content-affecting audio selection must use a different cache path");
+AssertFalse(
+    CacheFlyProtectServeSigner.Builder.TryCreate(
+        "c2VjcmV0",
+        "https://example.cachefly.net/not-hls",
+        21600,
+        out _,
+        out _),
+    "the ProtectServe signer must be confined to the /cachefly-hls namespace");
 
 AssertTrue(
     EsaPlaybackDirectUrlPolicy.TryRebaseSignedUrl(
@@ -102,6 +249,95 @@ AssertFalse(
         "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
         out _),
     "ESA direct URL must require HTTPS");
+
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.TryBuildOutputUrl(
+        PlaybackDirectUrlMode.CacheFly,
+        "https://example.cachefly.net/cachefly-stream",
+        "https://op.example.com/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out var cacheFlyUrl) &&
+    cacheFlyUrl ==
+        "https://example.cachefly.net/cachefly-stream/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+    "CacheFly mode should preserve the signed path in its isolated namespace");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.TryBuildOutputUrl(
+        PlaybackDirectUrlMode.Eo,
+        "https://eo-canary.example.com/eo-stream",
+        "https://op.example.com/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out var eoUrl) &&
+    eoUrl ==
+        "https://eo-canary.example.com/eo-stream/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+    "EO mode should preserve the signed path in its isolated namespace");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.TryBuildOutputUrl(
+        PlaybackDirectUrlMode.Main,
+        "https://main-canary.example.com/main-stream",
+        "https://op.example.com/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out var mainUrl) &&
+    mainUrl ==
+        "https://main-canary.example.com/main-stream/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+    "Main mode should preserve the signed path on the client-visible control host");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.TryBuildOutputUrl(
+        PlaybackDirectUrlMode.Main,
+        "https://main-canary.example.com/not-main-stream",
+        "https://op.example.com/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out _),
+    "Main mode must remain confined to the /main-stream namespace");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.IsUnsignedEoStreamBase(
+        "https://eo-canary.example.com/eo-stream/u-0123456789abcdef0123456789abcdef"),
+    "a fixed lowercase capability namespace should select unsigned EO mode");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.TryBuildUnsignedEoUrl(
+        "https://eo-canary.example.com/eo-stream/u-0123456789abcdef0123456789abcdef",
+        "/google/audit/%E4%B8%AD%E6%96%87%20file.mkv",
+        out var unsignedEoUrl) &&
+    unsignedEoUrl ==
+        "https://eo-canary.example.com/eo-stream/u-0123456789abcdef0123456789abcdef/google/audit/%E4%B8%AD%E6%96%87%20file.mkv",
+    "unsigned EO mode should preserve only the stable escaped resource path");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.IsUnsignedEoStreamBase(
+        "https://eo-canary.example.com/eo-stream/u-ABCDEF6789abcdef0123456789abcdef"),
+    "unsigned EO namespace must use exactly 32 lowercase hex characters");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.TryBuildUnsignedEoUrl(
+        "https://eo-canary.example.com/eo-stream/u-0123456789abcdef0123456789abcdef",
+        "/other/audit/file.mkv",
+        out _),
+    "unsigned EO mode must remain confined to normalized media resources");
+
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.TryBuildProtectedOriginalRedirectUrl(
+        PlaybackDirectUrlMode.Eo,
+        "https://eo.example.com/eo-stream/u-0123456789abcdef0123456789abcdef",
+        "https://main.example.com/main-stream",
+        null,
+        "/google/gdredir-admin/movie.mkv",
+        out var originalEoRedirect) &&
+    originalEoRedirect ==
+        "https://eo.example.com/eo-stream/u-0123456789abcdef0123456789abcdef/google/gdredir-admin/movie.mkv",
+    "an original video request from the EO entry must remain on the unsigned EO host");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.TryBuildProtectedOriginalRedirectUrl(
+        PlaybackDirectUrlMode.Main,
+        "https://eo.example.com/eo-stream/u-0123456789abcdef0123456789abcdef",
+        "https://main.example.com/main-stream",
+        "https://op.example.com/v1-canary/1783900000/nonce/signature/google/gdredir-admin/movie.mkv",
+        null,
+        out var originalMainRedirect) &&
+    originalMainRedirect ==
+        "https://main.example.com/main-stream/v1-canary/1783900000/nonce/signature/google/gdredir-admin/movie.mkv",
+    "an original video request from the Main entry must remain on the test host");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.TryBuildProtectedOriginalRedirectUrl(
+        PlaybackDirectUrlMode.Op,
+        "https://eo.example.com/eo-stream/u-0123456789abcdef0123456789abcdef",
+        "https://main.example.com/main-stream",
+        "https://op.example.com/v1-canary/1783900000/nonce/signature/google/gdredir-admin/movie.mkv",
+        "/google/gdredir-admin/movie.mkv",
+        out _),
+    "the protected original redirect helper must not change the normal OP path");
 
 AssertTrue(
     EsaPlaybackDirectUrlPolicy.TryBuildOutputUrl(
@@ -289,6 +525,12 @@ AssertTrue(
 AssertTrue(
     actualGoldenSignedUrl == goldenSignedUrl,
     "C# signer should match the v2 HMAC-SHA256 golden vector");
+
+AssertTrue(
+    opBuilder.TryBuildUnsignedResourcePath(goldenLegacyUrl, out var unsignedResourcePath) &&
+    unsignedResourcePath ==
+        "/google/audit/%E4%B8%AD%E6%96%87%20a%2Bb%2525.mkv",
+    "unsigned EO extraction should remove the legacy token without generating a signature");
 
 AssertTrue(
     opBuilder.TryBuild(goldenLegacyUrl, out var firstReusableSignedUrl) &&

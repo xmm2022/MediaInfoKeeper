@@ -145,6 +145,26 @@ namespace MediaInfoKeeper.Options
         [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
         public string EsaPlaybackDirectUrlBase { get; set; } = string.Empty;
 
+        [DisplayName("CacheFly Stream Base（实验）")]
+        [Description("仅供隔离 canary 的受保护 CacheFly 入口使用，例如 https://example.cachefly.net/cachefly-stream。留空即禁用该入口。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string CacheFlyPlaybackDirectUrlBase { get; set; } = string.Empty;
+
+        [DisplayName("CacheFly HLS Base（实验）")]
+        [Description("仅供隔离 canary 使用，例如 https://example.cachefly.net/cachefly-hls。该入口强制无转码 HLS remux，并使用 ProtectServe 目录签名。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string CacheFlyHlsPlaybackBase { get; set; } = string.Empty;
+
+        [DisplayName("CacheFly ProtectServe Key 文件")]
+        [Description("容器内只读 ProtectServe key 文件路径。不要把 key 内容写入插件配置。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string CacheFlyProtectServeKeyFile { get; set; } = "/config/plugins/cachefly-protectserve.key";
+
+        [DisplayName("EO Stream Base（实验）")]
+        [Description("仅供隔离 canary 的受保护 EO 入口使用，例如 https://eo-canary.example.com/eo-stream。留空即禁用该入口。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string EoPlaybackDirectUrlBase { get; set; } = string.Empty;
+
         [DisplayName("ESA 直链客户端白名单")]
         [Description("按 Emby 客户端名称精确匹配；支持逗号、分号或换行分隔。实验阶段建议仅填写 Hills。")]
         [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
@@ -158,6 +178,20 @@ namespace MediaInfoKeeper.Options
         [Description("按 Emby 客户端名称精确匹配；支持逗号、分号或换行分隔。实验阶段建议仅填写 Hills。")]
         [VisibleCondition(nameof(EnableOpPlaybackDirectUrl), SimpleCondition.IsTrue)]
         public string OpPlaybackDirectUrlClientAllowlist { get; set; } = "Hills";
+
+        [DisplayName("Main 同域 PlaybackInfo 直链（实验）")]
+        [Description("仅对带受保护 Main 入口标记、命中客户端白名单且可直放的远端 STRM 生效。把原生 OP 签名路径改写到同一个客户端可见域名，避免暴露第二个媒体域名。默认关闭。")]
+        public bool EnableMainPlaybackDirectUrl { get; set; } = false;
+
+        [DisplayName("Main 同域 Stream Base")]
+        [Description("必须是专用测试入口的 HTTPS /main-stream 地址，例如 https://main-canary.example.com/main-stream。")]
+        [VisibleCondition(nameof(EnableMainPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string MainPlaybackDirectUrlBase { get; set; } = string.Empty;
+
+        [DisplayName("Main 同域直链客户端白名单")]
+        [Description("按 Emby 客户端名称精确匹配；支持逗号、分号或换行分隔。")]
+        [VisibleCondition(nameof(EnableMainPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string MainPlaybackDirectUrlClientAllowlist { get; set; } = "Hills";
 
         [DisplayName("启用深度删除")]
         [Description("删除媒体时，尝试级联删除 STRM 或软链接目标文件及相关文件和空目录。")]
