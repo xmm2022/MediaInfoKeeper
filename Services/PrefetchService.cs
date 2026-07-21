@@ -101,7 +101,9 @@ namespace MediaInfoKeeper.Services
 
             var enableMediaInfoPrefetch = Plugin.Instance?.Options?.MediaInfo?.EnableMediaInfoPrefetch == true;
             var enableDanmuPrefetch = Plugin.Instance?.Options?.MetaData?.EnableDanmuPrefetch == true;
-            if (!enableMediaInfoPrefetch && !enableDanmuPrefetch)
+            var enableRangeCachePrefetch = Plugin.Instance?.Options?.MediaInfo?.EnableRangeCache == true &&
+                                           Plugin.Instance?.Options?.MediaInfo?.EnableNextEpisodeRangeCachePrewarm == true;
+            if (!enableMediaInfoPrefetch && !enableDanmuPrefetch && !enableRangeCachePrefetch)
             {
                 return;
             }
@@ -179,6 +181,15 @@ namespace MediaInfoKeeper.Services
                     if (Plugin.Instance?.Options?.MetaData?.EnableDanmuPrefetch == true)
                     {
                         prefetchTasks.Add(QueueDanmuPrefetchIfNeededAsync(nextEpisode, cancellationToken));
+                    }
+
+                    if (Plugin.Instance?.Options?.MediaInfo?.EnableRangeCache == true &&
+                        Plugin.Instance?.Options?.MediaInfo?.EnableNextEpisodeRangeCachePrewarm == true)
+                    {
+                        Plugin.RangeCachePrewarmService?.TriggerForPlaybackNextEpisode(
+                            nextEpisode,
+                            "播放下一集预热",
+                            Plugin.MediaInfoService.GetStaticMediaSources(nextEpisode, false));
                     }
 
                     if (prefetchTasks.Count > 0)

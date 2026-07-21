@@ -30,13 +30,25 @@ namespace MediaInfoKeeper.Options
         [Description("浏览视频或音频详情接口时，若条目没有媒体信息，则后台提取并写入 JSON。")]
         public bool ExtractMediaInfoOnItemDetail { get; set; } = false;
 
+        [DisplayName("启用 Range Cache")]
+        [Description("Range Cache 远程总开关。关闭后所有播放请求旁路缓存，并停止新建缓存和预热；不会删除已有缓存。")]
+        public bool EnableRangeCache { get; set; } = true;
+
         [DisplayName("提取成功后触发 Range Cache 预热")]
-        [Description("媒体信息提取或恢复成功后，调用 range-cache-proxy 内部接口预热 head/tail。默认关闭。")]
+        [Description("仅在入库、快捷菜单或计划任务提取/恢复成功后预热 head/tail；浏览详情和 MediaInfo 预加载不触发。默认关闭。")]
         public bool EnableRangeCachePrewarm { get; set; } = false;
+
+        [DisplayName("播放时预热下一集 Range Cache")]
+        [Description("开始播放剧集 5 秒后，独立预热下一集 head/tail。此功能不依赖下一集是否需要提取 MediaInfo。默认关闭。")]
+        public bool EnableNextEpisodeRangeCachePrewarm { get; set; } = false;
 
         [DisplayName("Range Cache 预热接口")]
         [Description("range-cache-proxy 内部接口地址。默认使用本机 loopback，不经过公网入口。")]
         public string RangeCachePrewarmEndpoint { get; set; } = "http://127.0.0.1:18180/internal/prewarm";
+
+        [DisplayName("Range Cache 控制接口")]
+        [Description("用于切换远程 Range Cache 总开关。默认通过本机预热桥转发，不直接连接远端 Go 服务。")]
+        public string RangeCacheControlEndpoint { get; set; } = "http://127.0.0.1:18180/internal/cache-mode";
 
         [DisplayName("Range Cache 预热密钥")]
         [Description("发送到 X-Range-Cache-Prewarm-Key 的内部密钥，应与 range-cache-proxy 的 prewarm_api_key 一致。")]

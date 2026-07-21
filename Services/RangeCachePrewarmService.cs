@@ -33,10 +33,58 @@ namespace MediaInfoKeeper.Services
             IEnumerable<MediaSourceInfo> mediaSources)
         {
             var options = this.getOptions?.Invoke()?.MediaInfo;
-            if (options?.EnableRangeCachePrewarm != true || item == null)
+            if (options?.EnableRangeCache != true ||
+                options.EnableRangeCachePrewarm != true ||
+                item == null)
             {
                 return;
             }
+
+            Trigger(item, source, mediaSources, options);
+        }
+
+        public void TriggerForPlaybackNextEpisode(
+            BaseItem item,
+            string source,
+            IEnumerable<MediaSourceInfo> mediaSources)
+        {
+            var options = this.getOptions?.Invoke()?.MediaInfo;
+            if (options?.EnableRangeCache != true ||
+                options.EnableNextEpisodeRangeCachePrewarm != true ||
+                item == null)
+            {
+                return;
+            }
+
+            Trigger(item, source, mediaSources, options);
+        }
+
+        public void UpdateMasterMode(bool enabled)
+        {
+            var options = this.getOptions?.Invoke()?.MediaInfo;
+            var endpoint = options?.RangeCacheControlEndpoint?.Trim();
+            var secret = options?.RangeCachePrewarmSecret?.Trim();
+            if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+                string.IsNullOrWhiteSpace(secret))
+            {
+                this.logger.Warn("Range Cache 总开关同步跳过: 控制接口或密钥无效");
+                return;
+            }
+
+            _ = Task.Run(() => PostMasterModeAsync(
+                uri.AbsoluteUri,
+                secret,
+                enabled,
+                CancellationToken.None));
+        }
+
+        private void Trigger(
+            BaseItem item,
+            string source,
+            IEnumerable<MediaSourceInfo> mediaSources,
+            MediaInfoOptions options)
+        {
 
             var itemId = item.Id.ToString();
             var mediaSourceIds = (mediaSources ?? Enumerable.Empty<MediaSourceInfo>())
@@ -70,6 +118,59 @@ namespace MediaInfoKeeper.Services
                 }
 
                 _ = Task.Run(() => PostPrewarmAsync(request, item, source, CancellationToken.None));
+            }
+        }
+
+        private async Task PostMasterModeAsync(
+            string endpoint,
+            string secret,
+            bool enabled,
+            CancellationToken cancellationToken)
+        {
+            if (this.httpClient == null)
+            {
+                this.logger.Warn("Range Cache 总开关同步跳过: IHttpClient 不可用");
+                return;
+            }
+
+            try
+            {
+                var requestOptions = new HttpRequestOptions
+                {
+                    Url = endpoint,
+                    CancellationToken = cancellationToken,
+                    AcceptHeader = "application/json",
+                    RequestContent = (enabled ? "{\"mode\":\"normal\"}" : "{\"mode\":\"bypass\"}").AsMemory(),
+                    RequestContentType = "application/json",
+                    UserAgent = "MediaInfoKeeper",
+                    EnableDefaultUserAgent = false,
+                    TimeoutMs = 5000,
+                    ThrowOnErrorResponse = false,
+                    LogRequest = false,
+                    LogResponse = false,
+                    LogErrors = false
+                };
+                requestOptions.RequestHeaders["X-Range-Cache-Prewarm-Key"] = secret;
+
+                using var response = await this.httpClient
+                    .SendAsync(requestOptions, "POST")
+                    .ConfigureAwait(false);
+                var statusCode = (int)response.StatusCode;
+                if (statusCode >= 200 && statusCode < 300)
+                {
+                    this.logger.Info("Range Cache 总开关已同步: {0}", enabled ? "开启" : "关闭（旁路）");
+                    return;
+                }
+
+                this.logger.Warn("Range Cache 总开关同步失败: status={0}", statusCode);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                this.logger.Warn("Range Cache 总开关同步异常: {0}", ex.Message);
+                this.logger.Debug(ex.StackTrace);
             }
         }
 

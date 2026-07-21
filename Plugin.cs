@@ -635,6 +635,7 @@ namespace MediaInfoKeeper
                     // 判断当前条目是否已有 MediaInfo。
                     var hasMediaInfo = MediaInfoService.HasMediaInfo(item);
                     var restoredMediaInfo = false;
+                    var extractedMediaInfo = false;
                     if (!hasMediaInfo)
                     {
                         // 优先尝试从 JSON 恢复，减少首次提取耗时。
@@ -656,6 +657,7 @@ namespace MediaInfoKeeper
                                     // 恢复失败时先触发媒体信息提取，再写入 JSON。
                                     var extracted = await MediaInfoRunner.ExtractMediaInfoAsync(itemId, "入库媒体信息", cancellationToken: CancellationToken.None)
                                         .ConfigureAwait(false);
+                                    extractedMediaInfo = extracted;
                                     if (!extracted)
                                     {
                                         this.logger.Info($"入库媒体信息: 提取失败 item={itemDisplayName}");
@@ -691,7 +693,7 @@ namespace MediaInfoKeeper
                         }
                     }
 
-                    if (RangeCachePrewarmTriggerPolicy.ShouldTriggerAfterItemAdded(hasMediaInfo, restoredMediaInfo))
+                    if (RangeCachePrewarmTriggerPolicy.ShouldTriggerAfterItemAdded(hasMediaInfo, restoredMediaInfo, extractedMediaInfo))
                     {
                         TriggerRangeCachePrewarmAfterItemAdded(item, "入库媒体信息");
                     }

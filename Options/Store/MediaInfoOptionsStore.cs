@@ -23,8 +23,14 @@ namespace MediaInfoKeeper.Options.Store
         public void SetOptions(MediaInfoOptions options)
         {
             var pluginOptions = this.pluginOptionsStore.GetOptions();
+            var previousMasterEnabled = pluginOptions.MediaInfo?.EnableRangeCache ?? true;
             pluginOptions.MediaInfo = options ?? new MediaInfoOptions();
             this.pluginOptionsStore.SetOptions(pluginOptions);
+
+            if (previousMasterEnabled != pluginOptions.MediaInfo.EnableRangeCache)
+            {
+                Plugin.RangeCachePrewarmService?.UpdateMasterMode(pluginOptions.MediaInfo.EnableRangeCache);
+            }
         }
     }
 }

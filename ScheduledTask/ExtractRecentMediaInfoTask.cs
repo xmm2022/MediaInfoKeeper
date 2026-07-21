@@ -113,6 +113,14 @@ namespace MediaInfoKeeper.ScheduledTask
                 .ExtractMediaInfoAsync(item.InternalId, source, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 
+            if (result)
+            {
+                Plugin.RangeCachePrewarmService?.TriggerAfterMediaInfoAvailable(
+                    item,
+                    source,
+                    Plugin.MediaInfoService.GetStaticMediaSources(item, false));
+            }
+
             this.logger.Info(result
                 ? $"完成: {displayName}"
                 : $"失败或跳过: {displayName}");
