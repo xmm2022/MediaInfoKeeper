@@ -79,6 +79,13 @@ namespace MediaInfoKeeper.Web.Handler
                     {
                         Plugin.Instance.Logger.Info($"快捷菜单提取媒体信息失败或跳过: {item.Path ?? item.Name}");
                     }
+                    else
+                    {
+                        Plugin.RangeCachePrewarmService?.TriggerAfterMediaInfoAvailable(
+                            item,
+                            "快捷菜单",
+                            Plugin.MediaInfoService.GetStaticMediaSources(item, false));
+                    }
                 }
                 catch (Exception ex)
                 {

@@ -112,6 +112,87 @@ namespace MediaInfoKeeper.Options
         [VisibleCondition(nameof(EnableStrmAudioDirectRedirect), SimpleCondition.IsTrue)]
         public string StrmAudioDirectRedirectClientBlacklist { get; set; } = "Emby Web";
 
+        [DisplayName("原生生成 op 签名地址")]
+        [Description("仅对精确匹配 legacy src 的 Google/OpenList STRM 直链生成短期 op 地址。默认关闭；失败时保留原 URL，交给现有 Caddy 签名桥回退。")]
+        public bool EnableStrmDirectRedirectOpSigning { get; set; } = false;
+
+        [DisplayName("op Public Base")]
+        [Description("必须为无路径和查询串的 HTTPS origin。")]
+        [VisibleCondition(nameof(EnableStrmDirectRedirectOpSigning), SimpleCondition.IsTrue)]
+        public string StrmDirectRedirectOpPublicBase { get; set; } = "https://op.inemby.us.ci";
+
+        [DisplayName("legacy src Host")]
+        [Description("仅匹配该 host:port 的 HTTP STRM URL；tes、已有 op 和本地媒体不会签名。")]
+        [VisibleCondition(nameof(EnableStrmDirectRedirectOpSigning), SimpleCondition.IsTrue)]
+        public string StrmDirectRedirectOpLegacyHost { get; set; } = "src.inemby.us.ci:18080";
+
+        [DisplayName("op 签名 TTL（秒）")]
+        [Description("必须在 1 到 21600 秒之间；生产验证器当前上限为 6 小时。")]
+        [VisibleCondition(nameof(EnableStrmDirectRedirectOpSigning), SimpleCondition.IsTrue)]
+        public int StrmDirectRedirectOpTtlSeconds { get; set; } = 21600;
+
+        [DisplayName("op 签名 Key 文件")]
+        [Description("容器内只读 key 文件路径。不要把 key 内容写入插件配置。")]
+        [VisibleCondition(nameof(EnableStrmDirectRedirectOpSigning), SimpleCondition.IsTrue)]
+        public string StrmDirectRedirectOpKeyFile { get; set; } = "/run/secrets/emby-op-signing-key";
+
+        [DisplayName("ESA PlaybackInfo 直链（实验）")]
+        [Description("仅对带受保护 ESA 入口标记、命中客户端白名单且可直放的远端 STRM 生效。把 PlaybackInfo 的 DirectStreamUrl 直接改为 ESA 签名地址，避免播放器每段 Range 再经过 Emby 302。默认关闭。")]
+        public bool EnableEsaPlaybackDirectUrl { get; set; } = false;
+
+        [DisplayName("ESA Stream Base")]
+        [Description("ESA 的 /stream 地址。生产建议填根相对路径 /stream，使播放器始终沿用当前访问域名；隔离 canary 也可填 https://esa-canary.example.com/stream。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string EsaPlaybackDirectUrlBase { get; set; } = string.Empty;
+
+        [DisplayName("CacheFly Stream Base（实验）")]
+        [Description("仅供隔离 canary 的受保护 CacheFly 入口使用，例如 https://example.cachefly.net/cachefly-stream。留空即禁用该入口。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string CacheFlyPlaybackDirectUrlBase { get; set; } = string.Empty;
+
+        [DisplayName("CacheFly HLS Base（实验）")]
+        [Description("仅供隔离 canary 使用，例如 https://example.cachefly.net/cachefly-hls。该入口强制无转码 HLS remux，并使用 ProtectServe 目录签名。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string CacheFlyHlsPlaybackBase { get; set; } = string.Empty;
+
+        [DisplayName("CacheFly ProtectServe Key 文件")]
+        [Description("容器内只读 ProtectServe key 文件路径。不要把 key 内容写入插件配置。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string CacheFlyProtectServeKeyFile { get; set; } = "/config/plugins/cachefly-protectserve.key";
+
+        [DisplayName("EO Stream Base（实验）")]
+        [Description("仅供隔离 canary 的受保护 EO 入口使用，例如 https://eo-canary.example.com/eo-stream。留空即禁用该入口。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string EoPlaybackDirectUrlBase { get; set; } = string.Empty;
+
+        [DisplayName("ESA 直链客户端白名单")]
+        [Description("按 Emby 客户端名称精确匹配；支持逗号、分号或换行分隔。实验阶段建议仅填写 Hills。")]
+        [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string EsaPlaybackDirectUrlClientAllowlist { get; set; } = "Hills";
+
+        [DisplayName("OP PlaybackInfo 直链（实验）")]
+        [Description("仅对带受保护 OP Direct 入口标记、命中客户端白名单且可直放的远端 STRM 生效。直接返回原生签名 OP 地址，不经过 ESA 媒体代理或 Emby 302。默认关闭。")]
+        public bool EnableOpPlaybackDirectUrl { get; set; } = false;
+
+        [DisplayName("OP 直链客户端白名单")]
+        [Description("按 Emby 客户端名称精确匹配；支持逗号、分号或换行分隔。实验阶段建议仅填写 Hills。")]
+        [VisibleCondition(nameof(EnableOpPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string OpPlaybackDirectUrlClientAllowlist { get; set; } = "Hills";
+
+        [DisplayName("Main 同域 PlaybackInfo 直链（实验）")]
+        [Description("仅对带受保护 Main 入口标记、命中客户端白名单且可直放的远端 STRM 生效。把原生 OP 签名路径改写到同一个客户端可见域名，避免暴露第二个媒体域名。默认关闭。")]
+        public bool EnableMainPlaybackDirectUrl { get; set; } = false;
+
+        [DisplayName("Main 同域 Stream Base")]
+        [Description("必须是专用测试入口的 HTTPS /main-stream 地址，例如 https://main-canary.example.com/main-stream。")]
+        [VisibleCondition(nameof(EnableMainPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string MainPlaybackDirectUrlBase { get; set; } = string.Empty;
+
+        [DisplayName("Main 同域直链客户端白名单")]
+        [Description("按 Emby 客户端名称精确匹配；支持逗号、分号或换行分隔。")]
+        [VisibleCondition(nameof(EnableMainPlaybackDirectUrl), SimpleCondition.IsTrue)]
+        public string MainPlaybackDirectUrlClientAllowlist { get; set; } = "Hills";
+
         [DisplayName("启用深度删除")]
         [Description("删除媒体时，尝试级联删除 STRM 或软链接目标文件及相关文件和空目录。")]
         public bool EnableDeepDelete { get; set; } = false;
@@ -326,7 +407,12 @@ namespace MediaInfoKeeper.Options
                 nameof(StrmVideoDirectRedirectClientBlacklist),
                 nameof(EnableStrmAudioDirectRedirect),
                 nameof(StrmAudioDirectRedirectFollow302),
-                nameof(StrmAudioDirectRedirectClientBlacklist));
+                nameof(StrmAudioDirectRedirectClientBlacklist),
+                nameof(EnableStrmDirectRedirectOpSigning),
+                nameof(StrmDirectRedirectOpPublicBase),
+                nameof(StrmDirectRedirectOpLegacyHost),
+                nameof(StrmDirectRedirectOpTtlSeconds),
+                nameof(StrmDirectRedirectOpKeyFile));
 
             AddGroup("深度删除", "",
                 nameof(EnableDeepDelete));

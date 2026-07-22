@@ -36,6 +36,12 @@ namespace MediaInfoKeeper.Patch
         private static string[] clientBlacklist = Array.Empty<string>();
         private static string[] urlAllowlist = Array.Empty<string>();
         private static string[] urlBlocklist = Array.Empty<string>();
+        private static bool eoOriginalRedirectEnabled;
+        private static string eoOriginalRedirectBase;
+        private static string[] eoOriginalRedirectClients = Array.Empty<string>();
+        private static bool mainOriginalRedirectEnabled;
+        private static string mainOriginalRedirectBase;
+        private static string[] mainOriginalRedirectClients = Array.Empty<string>();
 
         public static bool IsReady => harmony != null
             && processRequestMethod != null
@@ -49,17 +55,44 @@ namespace MediaInfoKeeper.Patch
             bool follow302,
             string urlAllowlistText,
             string urlBlocklistText,
-            string clientBlacklistText)
+            string clientBlacklistText,
+            bool eoRedirectEnabled,
+            string eoRedirectBase,
+            string eoClientAllowlist,
+            bool mainRedirectEnabled,
+            string mainRedirectBase,
+            string mainClientAllowlist)
         {
             if (harmony != null)
             {
-                Configure(enabled, follow302, urlAllowlistText, urlBlocklistText, clientBlacklistText);
+                Configure(
+                    enabled,
+                    follow302,
+                    urlAllowlistText,
+                    urlBlocklistText,
+                    clientBlacklistText,
+                    eoRedirectEnabled,
+                    eoRedirectBase,
+                    eoClientAllowlist,
+                    mainRedirectEnabled,
+                    mainRedirectBase,
+                    mainClientAllowlist);
                 return;
             }
 
             logger = pluginLogger;
             isEnabled = enabled;
-            ApplySettings(follow302, urlAllowlistText, urlBlocklistText, clientBlacklistText);
+            ApplySettings(
+                follow302,
+                urlAllowlistText,
+                urlBlocklistText,
+                clientBlacklistText,
+                eoRedirectEnabled,
+                eoRedirectBase,
+                eoClientAllowlist,
+                mainRedirectEnabled,
+                mainRedirectBase,
+                mainClientAllowlist);
 
             try
             {
@@ -165,10 +198,26 @@ namespace MediaInfoKeeper.Patch
             bool follow302,
             string urlAllowlistText,
             string urlBlocklistText,
-            string clientBlacklistText)
+            string clientBlacklistText,
+            bool eoRedirectEnabled,
+            string eoRedirectBase,
+            string eoClientAllowlist,
+            bool mainRedirectEnabled,
+            string mainRedirectBase,
+            string mainClientAllowlist)
         {
             isEnabled = enabled;
-            ApplySettings(follow302, urlAllowlistText, urlBlocklistText, clientBlacklistText);
+            ApplySettings(
+                follow302,
+                urlAllowlistText,
+                urlBlocklistText,
+                clientBlacklistText,
+                eoRedirectEnabled,
+                eoRedirectBase,
+                eoClientAllowlist,
+                mainRedirectEnabled,
+                mainRedirectBase,
+                mainClientAllowlist);
             if (harmony == null)
             {
                 return;
@@ -267,28 +316,51 @@ namespace MediaInfoKeeper.Patch
                 if (!StrmDirectRedirectUrlFilter.IsAllowed(originalUrl, urlAllowlist, urlBlocklist))
                 {
                     logger?.Info(
-                        "StrmVideoDirectRedirect: URL 未命中直连规则，回退 Emby 中转。itemId={0}, url={1}",
+                        "StrmVideoDirectRedirect: URL 未命中直连规则，回退 Emby 中转。itemId={0}, target={1}",
                         itemId,
-                        originalUrl);
+                        OpSignedUrlSigner.DescribeTarget(originalUrl));
                     DisposeState(state);
                     return true;
                 }
 
-                var redirectUrl = ResolveRedirectUrl(originalUrl, requestContext?.UserAgent);
-                var decodedRedirectUrl = redirectUrl;
-                if (!string.IsNullOrWhiteSpace(decodedRedirectUrl))
+                if (HasProtectedOriginalRedirectMarker(requestContext))
                 {
-                    try
+                    var mode = ResolveProtectedOriginalRedirectMode(requestContext);
+                    if (!TryBuildProtectedOriginalRedirectUrl(
+                            mode,
+                            originalUrl,
+                            out var protectedRedirectUrl))
                     {
-                        decodedRedirectUrl = Uri.UnescapeDataString(decodedRedirectUrl);
+                        logger?.Warn(
+                            "StrmVideoDirectRedirect: 受保护入口无法生成同域地址，保留 Emby 原地址。itemId={0}, mode={1}",
+                            itemId,
+                            mode);
+                        DisposeState(state);
+                        return true;
                     }
-                    catch
-                    {
-                    }
+
+                    __result = Task.FromResult(
+                        resultFactory.GetRedirectResult(protectedRedirectUrl));
+                    logger?.Info(
+                        "StrmVideoDirectRedirect: itemId={0}, route={1}, target={2}",
+                        itemId,
+                        mode == PlaybackDirectUrlMode.Eo ? "EoUnsigned" : "Main",
+                        OpSignedUrlSigner.DescribeTarget(protectedRedirectUrl));
+                    DisposeState(state);
+                    return false;
                 }
 
+                var nativeOpSigned = OpSignedUrlSigner.TryBuild(originalUrl, out var signedUrl);
+                var redirectUrl = nativeOpSigned
+                    ? signedUrl
+                    : ResolveRedirectUrl(originalUrl, requestContext?.UserAgent);
+
                 __result = Task.FromResult(resultFactory.GetRedirectResult(redirectUrl));
-                logger?.Info("StrmVideoDirectRedirect: itemId={0}, finalUrl={1}", itemId, decodedRedirectUrl);
+                logger?.Info(
+                    "StrmVideoDirectRedirect: itemId={0}, target={1}, nativeOpSigned={2}",
+                    itemId,
+                    OpSignedUrlSigner.DescribeTarget(redirectUrl),
+                    nativeOpSigned);
                 DisposeState(state);
                 return false;
             }
@@ -450,12 +522,99 @@ namespace MediaInfoKeeper.Patch
             bool follow302,
             string urlAllowlistText,
             string urlBlocklistText,
-            string clientBlacklistText)
+            string clientBlacklistText,
+            bool eoRedirectEnabled,
+            string eoRedirectBase,
+            string eoClientAllowlist,
+            bool mainRedirectEnabled,
+            string mainRedirectBase,
+            string mainClientAllowlist)
         {
             followRedirect302 = follow302;
             urlAllowlist = StrmDirectRedirectUrlFilter.ParsePatterns(urlAllowlistText);
             urlBlocklist = StrmDirectRedirectUrlFilter.ParsePatterns(urlBlocklistText);
             clientBlacklist = ParseClientBlacklist(clientBlacklistText);
+            eoOriginalRedirectEnabled = eoRedirectEnabled;
+            eoOriginalRedirectBase = eoRedirectBase?.Trim();
+            eoOriginalRedirectClients =
+                EsaPlaybackDirectUrlPolicy.ParseClients(eoClientAllowlist);
+            mainOriginalRedirectEnabled = mainRedirectEnabled;
+            mainOriginalRedirectBase = mainRedirectBase?.Trim();
+            mainOriginalRedirectClients =
+                EsaPlaybackDirectUrlPolicy.ParseClients(mainClientAllowlist);
+        }
+
+        private static bool HasProtectedOriginalRedirectMarker(IRequest requestContext)
+        {
+            return IsProtectedMarker(
+                    requestContext?.Headers?[EsaPlaybackDirectUrlPolicy.EoMarkerHeader]) ||
+                IsProtectedMarker(
+                    requestContext?.Headers?[EsaPlaybackDirectUrlPolicy.MainMarkerHeader]);
+        }
+
+        private static bool IsProtectedMarker(string value)
+        {
+            return string.Equals(
+                value?.Trim(),
+                EsaPlaybackDirectUrlPolicy.MarkerValue,
+                StringComparison.Ordinal);
+        }
+
+        private static PlaybackDirectUrlMode ResolveProtectedOriginalRedirectMode(
+            IRequest requestContext)
+        {
+            return EsaPlaybackDirectUrlPolicy.ResolveMode(
+                eoOriginalRedirectEnabled,
+                null,
+                null,
+                null,
+                requestContext?.Headers?[EsaPlaybackDirectUrlPolicy.EoMarkerHeader],
+                eoOriginalRedirectClients,
+                false,
+                null,
+                Array.Empty<string>(),
+                mainOriginalRedirectEnabled,
+                requestContext?.Headers?[EsaPlaybackDirectUrlPolicy.MainMarkerHeader],
+                mainOriginalRedirectClients,
+                ResolveClient(requestContext));
+        }
+
+        private static bool TryBuildProtectedOriginalRedirectUrl(
+            PlaybackDirectUrlMode mode,
+            string originalUrl,
+            out string redirectUrl)
+        {
+            redirectUrl = null;
+            string signedOpUrl = null;
+            string unsignedResourcePath = null;
+            if (mode == PlaybackDirectUrlMode.Eo)
+            {
+                if (!OpSignedUrlSigner.TryBuildUnsignedResourcePath(
+                        originalUrl,
+                        out unsignedResourcePath))
+                {
+                    return false;
+                }
+            }
+            else if (mode == PlaybackDirectUrlMode.Main)
+            {
+                if (!OpSignedUrlSigner.TryBuildMain(originalUrl, out signedOpUrl))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+
+            return EsaPlaybackDirectUrlPolicy.TryBuildProtectedOriginalRedirectUrl(
+                mode,
+                eoOriginalRedirectBase,
+                mainOriginalRedirectBase,
+                signedOpUrl,
+                unsignedResourcePath,
+                out redirectUrl);
         }
 
         /// <summary>解析用于 302 返回的直链地址；开启跟踪时主动探测最终地址，否则直接返回原始 URL。</summary>

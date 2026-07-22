@@ -39,6 +39,7 @@ namespace MediaInfoKeeper.Patch
         private static ILogger logger;
         private static IActivityManager activityManager;
         private static string lastReportedFailureKey;
+        private static string lastOpSigningStatusKey;
 
         public static IReadOnlyCollection<PatchTracker> Trackers => trackers.AsReadOnly();
 
@@ -74,6 +75,7 @@ namespace MediaInfoKeeper.Patch
             lock (InitLock)
             {
                 var safeOptions = EnsureOptions(options);
+                ConfigureOpSignedUrlSigner(safeOptions);
 
                 foreach (var registration in registrations)
                 {
@@ -465,13 +467,25 @@ namespace MediaInfoKeeper.Patch
                     options.Enhance.StrmVideoDirectRedirectFollow302,
                     options.Enhance.StrmDirectRedirectUrlAllowlist,
                     options.Enhance.StrmDirectRedirectUrlBlocklist,
-                    options.Enhance.StrmVideoDirectRedirectClientBlacklist),
+                    options.Enhance.StrmVideoDirectRedirectClientBlacklist,
+                    options.Enhance.EnableEsaPlaybackDirectUrl,
+                    options.Enhance.EoPlaybackDirectUrlBase,
+                    options.Enhance.EsaPlaybackDirectUrlClientAllowlist,
+                    options.Enhance.EnableMainPlaybackDirectUrl,
+                    options.Enhance.MainPlaybackDirectUrlBase,
+                    options.Enhance.MainPlaybackDirectUrlClientAllowlist),
                 Configure = options => StrmVideoDirectRedirect.Configure(
                     IsPluginEnabled(options) && options.Enhance.EnableStrmVideoDirectRedirect,
                     options.Enhance.StrmVideoDirectRedirectFollow302,
                     options.Enhance.StrmDirectRedirectUrlAllowlist,
                     options.Enhance.StrmDirectRedirectUrlBlocklist,
-                    options.Enhance.StrmVideoDirectRedirectClientBlacklist),
+                    options.Enhance.StrmVideoDirectRedirectClientBlacklist,
+                    IsPluginEnabled(options) && options.Enhance.EnableEsaPlaybackDirectUrl,
+                    options.Enhance.EoPlaybackDirectUrlBase,
+                    options.Enhance.EsaPlaybackDirectUrlClientAllowlist,
+                    IsPluginEnabled(options) && options.Enhance.EnableMainPlaybackDirectUrl,
+                    options.Enhance.MainPlaybackDirectUrlBase,
+                    options.Enhance.MainPlaybackDirectUrlClientAllowlist),
                 IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmVideoDirectRedirect,
                 IsReady = () => StrmVideoDirectRedirect.IsReady
             });
@@ -494,6 +508,44 @@ namespace MediaInfoKeeper.Patch
                     options.Enhance.StrmAudioDirectRedirectClientBlacklist),
                 IsEnabled = options => IsPluginEnabled(options) && options.Enhance.EnableStrmAudioDirectRedirect,
                 IsReady = () => StrmAudioDirectRedirect.IsReady
+            });
+
+            registrations.Add(new PatchRegistration
+            {
+                Name = "EsaPlaybackDirectUrl",
+                Initialize = options => EsaPlaybackDirectUrl.Initialize(
+                    logger,
+                    IsPluginEnabled(options) && options.Enhance.EnableEsaPlaybackDirectUrl,
+                    options.Enhance.EsaPlaybackDirectUrlBase,
+                    options.Enhance.CacheFlyPlaybackDirectUrlBase,
+                    options.Enhance.CacheFlyHlsPlaybackBase,
+                    options.Enhance.CacheFlyProtectServeKeyFile,
+                    options.Enhance.EoPlaybackDirectUrlBase,
+                    options.Enhance.EsaPlaybackDirectUrlClientAllowlist,
+                    IsPluginEnabled(options) && options.Enhance.EnableOpPlaybackDirectUrl,
+                    options.Enhance.OpPlaybackDirectUrlClientAllowlist,
+                    IsPluginEnabled(options) && options.Enhance.EnableMainPlaybackDirectUrl,
+                    options.Enhance.MainPlaybackDirectUrlBase,
+                    options.Enhance.MainPlaybackDirectUrlClientAllowlist),
+                Configure = options => EsaPlaybackDirectUrl.Configure(
+                    IsPluginEnabled(options) && options.Enhance.EnableEsaPlaybackDirectUrl,
+                    options.Enhance.EsaPlaybackDirectUrlBase,
+                    options.Enhance.CacheFlyPlaybackDirectUrlBase,
+                    options.Enhance.CacheFlyHlsPlaybackBase,
+                    options.Enhance.CacheFlyProtectServeKeyFile,
+                    options.Enhance.EoPlaybackDirectUrlBase,
+                    options.Enhance.EsaPlaybackDirectUrlClientAllowlist,
+                    IsPluginEnabled(options) && options.Enhance.EnableOpPlaybackDirectUrl,
+                    options.Enhance.OpPlaybackDirectUrlClientAllowlist,
+                    IsPluginEnabled(options) && options.Enhance.EnableMainPlaybackDirectUrl,
+                    options.Enhance.MainPlaybackDirectUrlBase,
+                    options.Enhance.MainPlaybackDirectUrlClientAllowlist),
+                IsEnabled = options => IsPluginEnabled(options) &&
+                    (options.Enhance.EnableEsaPlaybackDirectUrl ||
+                     options.Enhance.EnableOpPlaybackDirectUrl ||
+                     options.Enhance.EnableMainPlaybackDirectUrl),
+                IsReady = () => EsaPlaybackDirectUrl.IsReady,
+                Notes = () => "protected ESA/CacheFly/EO/OP/Main marker + exact client allowlist; optional signed CacheFly HLS remux"
             });
 
             registrations.Add(new PatchRegistration
@@ -712,6 +764,41 @@ namespace MediaInfoKeeper.Patch
         private static bool IsPluginEnabled(PluginConfiguration options)
         {
             return options?.MainPage?.PlugginEnabled ?? true;
+        }
+
+        private static void ConfigureOpSignedUrlSigner(PluginConfiguration options)
+        {
+            var enhance = options?.Enhance ?? new EnhanceOptions();
+            var enabled = IsPluginEnabled(options) && enhance.EnableStrmDirectRedirectOpSigning;
+            var ready = OpSignedUrlSigner.Configure(
+                enabled,
+                enhance.StrmDirectRedirectOpKeyFile,
+                enhance.StrmDirectRedirectOpPublicBase,
+                enhance.StrmDirectRedirectOpLegacyHost,
+                enhance.StrmDirectRedirectOpTtlSeconds,
+                out var error);
+
+            var statusKey = enabled + "|" + ready + "|" + (error ?? string.Empty);
+            if (string.Equals(lastOpSigningStatusKey, statusKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            lastOpSigningStatusKey = statusKey;
+            if (!enabled)
+            {
+                logger?.Debug("OpSignedUrlSigner: 原生 op 签名已禁用");
+            }
+            else if (ready)
+            {
+                logger?.Info("OpSignedUrlSigner: 原生 op 签名已就绪");
+            }
+            else
+            {
+                logger?.Warn(
+                    "OpSignedUrlSigner: 原生 op 签名未就绪，将保留 src 交由现有签名桥回退。reason={0}",
+                    error ?? "unknown");
+            }
         }
 
         private static PluginConfiguration EnsureOptions(PluginConfiguration options)
