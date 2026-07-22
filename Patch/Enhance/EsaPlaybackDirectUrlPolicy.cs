@@ -38,6 +38,18 @@ namespace MediaInfoKeeper.Patch
                     .ToArray();
         }
 
+        internal static bool IsPlaybackInfoDirectUrlCompatible(string client)
+        {
+            // Hills Windows 1.3.1 treats an absolute DirectStreamUrl as an
+            // Emby-relative path (for example /embyhttps://host/stream/...).
+            // Keep this client on Emby's original stream endpoint so the
+            // existing protected 302 path can still return the unified URL.
+            return !string.Equals(
+                client?.Trim(),
+                "Hills Windows",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
         internal static bool IsRequestEligible(
             bool enabled,
             string markerValue,
@@ -265,7 +277,32 @@ namespace MediaInfoKeeper.Patch
         private static bool TryNormalizeStreamBase(string text, out string normalized)
         {
             normalized = null;
-            if (!Uri.TryCreate(text?.Trim(), UriKind.Absolute, out var uri) ||
+            var candidate = text?.Trim();
+            if (string.IsNullOrEmpty(candidate))
+            {
+                return false;
+            }
+
+            if (candidate[0] == '/')
+            {
+                if (candidate.Length > 1 && candidate[1] == '/')
+                {
+                    return false;
+                }
+
+                var relativePath = candidate.EndsWith("/", StringComparison.Ordinal)
+                    ? candidate.Substring(0, candidate.Length - 1)
+                    : candidate;
+                if (!IsAllowedStreamPath(relativePath))
+                {
+                    return false;
+                }
+
+                normalized = relativePath;
+                return true;
+            }
+
+            if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri) ||
                 !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(uri.Host) ||
                 !string.IsNullOrEmpty(uri.UserInfo) ||

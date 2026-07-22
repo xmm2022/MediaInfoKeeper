@@ -36,6 +36,18 @@ AssertTrue(
     EsaPlaybackDirectUrlPolicy.IsRequestEligible(true, "1", null, allClients),
     "the explicit wildcard should allow every client through a protected ESA entry");
 AssertFalse(
+    EsaPlaybackDirectUrlPolicy.IsPlaybackInfoDirectUrlCompatible("Hills Windows"),
+    "Hills Windows must keep Emby's original stream endpoint instead of receiving an injected absolute URL");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.IsPlaybackInfoDirectUrlCompatible("  hills windows  "),
+    "the Hills Windows compatibility match should ignore case and surrounding whitespace");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.IsPlaybackInfoDirectUrlCompatible("Hills"),
+    "Hills mobile must not inherit the Windows-only compatibility path");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.IsPlaybackInfoDirectUrlCompatible("Emby Theater"),
+    "unrelated clients must retain PlaybackInfo direct URL injection");
+AssertFalse(
     EsaPlaybackDirectUrlPolicy.IsRequestEligible(true, null, null, allClients),
     "the wildcard must not bypass the protected ESA marker");
 
@@ -237,6 +249,14 @@ AssertTrue(
     rebasedEsaUrl ==
         "https://esa-canary.822211.xyz/stream/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
     "ESA URL rebasing should preserve the full signed path");
+AssertTrue(
+    EsaPlaybackDirectUrlPolicy.TryRebaseSignedUrl(
+        "/stream/",
+        "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out var sameOriginEsaUrl) &&
+    sameOriginEsaUrl ==
+        "/stream/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+    "a root-relative ESA stream base should keep playback on the current client-visible host");
 AssertFalse(
     EsaPlaybackDirectUrlPolicy.TryRebaseSignedUrl(
         "https://esa-canary.822211.xyz/control",
@@ -249,6 +269,29 @@ AssertFalse(
         "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
         out _),
     "ESA direct URL must require HTTPS");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.TryRebaseSignedUrl(
+        "//attacker.invalid/stream",
+        "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out _),
+    "a scheme-relative stream base must not escape the current host");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.TryRebaseSignedUrl(
+        "/stream?next=https://attacker.invalid",
+        "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out _),
+    "a root-relative stream base must not contain a query");
+AssertFalse(
+    EsaPlaybackDirectUrlPolicy.TryRebaseSignedUrl(
+        "/stream/../control",
+        "https://op.inemby.us.ci/v1-canary/1783900000/nonce/signature/google/audit/file.mkv",
+        out _),
+    "a root-relative stream base must not permit path traversal");
+AssertTrue(
+    OpSignedUrlSigner.DescribeTarget(
+        "/stream/v1-canary/1783900000/nonce/signature/google/audit/file.mkv") ==
+        "same-origin:/stream",
+    "same-origin playback targets should be identifiable without inventing a host");
 
 AssertTrue(
     EsaPlaybackDirectUrlPolicy.TryBuildOutputUrl(
@@ -560,6 +603,55 @@ AssertTrue(
         out var openListSignedUrl) &&
     openListSignedUrl.Contains("/openlist/audit/file.mkv", StringComparison.Ordinal),
     "openlist resources should be signed");
+
+const string main115TesUrl =
+    "https://tes.inemby.us.ci/0123456789abcdef0123456789abcdef/cd2/vault-47f2/" +
+    "%E7%94%B5%E5%BD%B1%2F%E6%B5%8B%E8%AF%95%20%7Btmdb-1%7D%2Fmovie.mkv";
+AssertTrue(
+    opBuilder.TryBuildMain(
+        main115TesUrl,
+        1783878400,
+        signingNonce,
+        out var main115TesSignedUrl) &&
+    main115TesSignedUrl.EndsWith(
+        "/openlist/__main_115__/vault-47f2/" +
+        "%E7%94%B5%E5%BD%B1/%E6%B5%8B%E8%AF%95%20%7Btmdb-1%7D/movie.mkv",
+        StringComparison.Ordinal),
+    "Main mode should translate a canonical tes 115 URL into its reserved signed namespace");
+AssertFalse(
+    opBuilder.TryBuild(main115TesUrl, 1783878400, signingNonce, out _),
+    "normal OP/EO/ESA signing must remain unchanged for tes 115 URLs");
+
+const string main115SrcUrl =
+    "http://src.inemby.us.ci:18080/0123456789abcdef0123456789abcdef/115/vault-47f2/" +
+    "%E7%94%B5%E5%BD%B1%2Fmovie.mkv";
+AssertTrue(
+    opBuilder.TryBuildMain(
+        main115SrcUrl,
+        1783878400,
+        signingNonce,
+        out var main115SrcSignedUrl) &&
+    main115SrcSignedUrl.EndsWith(
+        "/openlist/__main_115__/vault-47f2/%E7%94%B5%E5%BD%B1/movie.mkv",
+        StringComparison.Ordinal),
+    "Main mode should also accept the canonical src 115 namespace used by future STRM files");
+
+foreach (var rejectedMain115Url in new[]
+{
+    "https://tes.inemby.us.ci/short/cd2/vault-47f2/movie.mkv",
+    "https://tes.inemby.us.ci/0123456789abcdef0123456789abcdef/other/vault-47f2/movie.mkv",
+    "https://tes.inemby.us.ci/0123456789abcdef0123456789abcdef/cd2/other/movie.mkv",
+    "https://tes.inemby.us.ci/0123456789abcdef0123456789abcdef/cd2/vault-47f2/%2e%2e%2Fmovie.mkv",
+    "https://tes.inemby.us.ci/0123456789abcdef0123456789abcdef/cd2/vault-47f2/a%5Cb.mkv",
+    "https://tes.inemby.us.ci/0123456789abcdef0123456789abcdef/cd2/vault-47f2/movie.mkv?query=1",
+    "https://user@tes.inemby.us.ci/0123456789abcdef0123456789abcdef/cd2/vault-47f2/movie.mkv"
+})
+{
+    AssertFalse(
+        opBuilder.TryBuildMain(rejectedMain115Url, 1783878400, signingNonce, out _),
+        "Main 115 signing must reject non-canonical URLs: " +
+        OpSignedUrlSigner.DescribeTarget(rejectedMain115Url));
+}
 
 foreach (var rejectedUrl in new[]
 {

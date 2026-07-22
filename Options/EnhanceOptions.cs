@@ -141,7 +141,7 @@ namespace MediaInfoKeeper.Options
         public bool EnableEsaPlaybackDirectUrl { get; set; } = false;
 
         [DisplayName("ESA Stream Base")]
-        [Description("独立 canary ESA 入口的 HTTPS /stream 地址，例如 https://esa-canary.example.com/stream。")]
+        [Description("ESA 的 /stream 地址。生产建议填根相对路径 /stream，使播放器始终沿用当前访问域名；隔离 canary 也可填 https://esa-canary.example.com/stream。")]
         [VisibleCondition(nameof(EnableEsaPlaybackDirectUrl), SimpleCondition.IsTrue)]
         public string EsaPlaybackDirectUrlBase { get; set; } = string.Empty;
 

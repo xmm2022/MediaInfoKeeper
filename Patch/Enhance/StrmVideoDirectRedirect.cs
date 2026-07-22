@@ -598,7 +598,7 @@ namespace MediaInfoKeeper.Patch
             }
             else if (mode == PlaybackDirectUrlMode.Main)
             {
-                if (!OpSignedUrlSigner.TryBuild(originalUrl, out signedOpUrl))
+                if (!OpSignedUrlSigner.TryBuildMain(originalUrl, out signedOpUrl))
                 {
                     return false;
                 }

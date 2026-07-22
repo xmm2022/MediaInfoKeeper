@@ -22,6 +22,8 @@ namespace MediaInfoKeeper.Patch
             private const int NonceLength = 16;
             private const int MaximumTtlSeconds = 6 * 60 * 60;
             private const int SignedUrlReuseSeconds = 30;
+            private const string Main115Host = "tes.inemby.us.ci";
+            private const string Main115ResourcePrefix = "/openlist/__main_115__/vault-47f2/";
             private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
 
             private readonly byte[] key;
@@ -89,11 +91,38 @@ namespace MediaInfoKeeper.Patch
             internal bool TryBuild(string legacyUrl, out string signedUrl)
             {
                 signedUrl = null;
+                if (!TryExtractNormalizedResource(legacyUrl, legacyAuthority, out var resource))
+                {
+                    return false;
+                }
+
+                return TryBuildCached(legacyUrl, resource, out signedUrl);
+            }
+
+            internal bool TryBuildMain(string legacyUrl, out string signedUrl)
+            {
+                signedUrl = null;
+                if (TryExtractNormalizedResource(legacyUrl, legacyAuthority, out var resource))
+                {
+                    return TryBuildCached(legacyUrl, resource, out signedUrl);
+                }
+
+                if (!TryExtractMain115Resource(legacyUrl, legacyAuthority, out resource))
+                {
+                    return false;
+                }
+
+                return TryBuildCached("main-115\n" + legacyUrl, resource, out signedUrl);
+            }
+
+            private bool TryBuildCached(string cacheKey, string resource, out string signedUrl)
+            {
+                signedUrl = null;
                 var nowUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
                 lock (signedUrlCacheLock)
                 {
-                    if (signedUrlCache.TryGetValue(legacyUrl ?? string.Empty, out var cached) &&
+                    if (signedUrlCache.TryGetValue(cacheKey ?? string.Empty, out var cached) &&
                         cached.ReuseUntilUnixSeconds > nowUnixSeconds)
                     {
                         signedUrl = cached.Url;
@@ -114,7 +143,7 @@ namespace MediaInfoKeeper.Patch
                         random.GetBytes(nonce);
                     }
 
-                    if (!TryBuild(legacyUrl, nowUnixSeconds, nonce, out signedUrl))
+                    if (!TryBuildResource(resource, nowUnixSeconds, nonce, out signedUrl))
                     {
                         return false;
                     }
@@ -122,7 +151,7 @@ namespace MediaInfoKeeper.Patch
                     var reuseSeconds = Math.Min(SignedUrlReuseSeconds, Math.Max(0, ttlSeconds - 1));
                     if (reuseSeconds > 0)
                     {
-                        signedUrlCache[legacyUrl] = new CachedSignedUrl
+                        signedUrlCache[cacheKey] = new CachedSignedUrl
                         {
                             Url = signedUrl,
                             ReuseUntilUnixSeconds = nowUnixSeconds + reuseSeconds
@@ -155,6 +184,34 @@ namespace MediaInfoKeeper.Patch
                 {
                     return false;
                 }
+
+                return TryBuildResource(resource, nowUnixSeconds, nonce, out signedUrl);
+            }
+
+            internal bool TryBuildMain(
+                string legacyUrl,
+                long nowUnixSeconds,
+                byte[] nonce,
+                out string signedUrl)
+            {
+                signedUrl = null;
+                if (nonce == null || nonce.Length != NonceLength ||
+                    (!TryExtractNormalizedResource(legacyUrl, legacyAuthority, out var resource) &&
+                     !TryExtractMain115Resource(legacyUrl, legacyAuthority, out resource)))
+                {
+                    return false;
+                }
+
+                return TryBuildResource(resource, nowUnixSeconds, nonce, out signedUrl);
+            }
+
+            private bool TryBuildResource(
+                string resource,
+                long nowUnixSeconds,
+                byte[] nonce,
+                out string signedUrl)
+            {
+                signedUrl = null;
 
                 long expiry;
                 try
@@ -274,6 +331,80 @@ namespace MediaInfoKeeper.Patch
                 }
 
                 resource = decodedResource;
+                return true;
+            }
+
+            private static bool TryExtractMain115Resource(
+                string legacyUrl,
+                string expectedLegacyAuthority,
+                out string resource)
+            {
+                resource = null;
+                if (!Uri.TryCreate(legacyUrl?.Trim(), UriKind.Absolute, out var uri) ||
+                    !string.IsNullOrEmpty(uri.UserInfo) ||
+                    !string.IsNullOrEmpty(uri.Query) ||
+                    !string.IsNullOrEmpty(uri.Fragment))
+                {
+                    return false;
+                }
+
+                string requiredRouteSegment;
+                if (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(uri.Authority, expectedLegacyAuthority, StringComparison.OrdinalIgnoreCase))
+                {
+                    requiredRouteSegment = "115";
+                }
+                else if (
+                    string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+                    uri.IsDefaultPort &&
+                    string.Equals(uri.Host, Main115Host, StringComparison.OrdinalIgnoreCase))
+                {
+                    requiredRouteSegment = "cd2";
+                }
+                else
+                {
+                    return false;
+                }
+
+                var rawPath = uri.GetComponents(UriComponents.Path, UriFormat.UriEscaped);
+                var firstSeparator = rawPath.IndexOf('/');
+                var secondSeparator = firstSeparator < 0
+                    ? -1
+                    : rawPath.IndexOf('/', firstSeparator + 1);
+                var thirdSeparator = secondSeparator < 0
+                    ? -1
+                    : rawPath.IndexOf('/', secondSeparator + 1);
+                if (firstSeparator != 32 || secondSeparator < 0 || thirdSeparator < 0 ||
+                    !IsHexToken(rawPath.Substring(0, firstSeparator), 32) ||
+                    !string.Equals(
+                        rawPath.Substring(firstSeparator + 1, secondSeparator - firstSeparator - 1),
+                        requiredRouteSegment,
+                        StringComparison.Ordinal) ||
+                    !string.Equals(
+                        rawPath.Substring(secondSeparator + 1, thirdSeparator - secondSeparator - 1),
+                        "vault-47f2",
+                        StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var rawMediaPath = rawPath.Substring(thirdSeparator + 1);
+                if (string.IsNullOrEmpty(rawMediaPath) ||
+                    !TryPercentDecodeUtf8(rawMediaPath, out var decodedMediaPath) ||
+                    string.IsNullOrEmpty(decodedMediaPath) ||
+                    decodedMediaPath[0] == '/' ||
+                    decodedMediaPath[0] == '\\')
+                {
+                    return false;
+                }
+
+                var normalized = Main115ResourcePrefix + decodedMediaPath;
+                if (!IsNormalizedResource(normalized))
+                {
+                    return false;
+                }
+
+                resource = normalized;
                 return true;
             }
 
@@ -497,6 +628,13 @@ namespace MediaInfoKeeper.Patch
             return builder != null && builder.TryBuild(legacyUrl, out signedUrl);
         }
 
+        internal static bool TryBuildMain(string legacyUrl, out string signedUrl)
+        {
+            signedUrl = null;
+            var builder = Interlocked.CompareExchange(ref current, null, null);
+            return builder != null && builder.TryBuildMain(legacyUrl, out signedUrl);
+        }
+
         internal static bool TryBuildUnsignedResourcePath(
             string legacyUrl,
             out string resourcePath)
@@ -509,6 +647,16 @@ namespace MediaInfoKeeper.Patch
 
         internal static string DescribeTarget(string url)
         {
+            if (Uri.TryCreate(url, UriKind.Relative, out var relativeUri) &&
+                url.StartsWith("/", StringComparison.Ordinal) &&
+                !url.StartsWith("//", StringComparison.Ordinal))
+            {
+                var separator = relativeUri.OriginalString.IndexOf('/', 1);
+                return separator < 0
+                    ? "same-origin:" + relativeUri.OriginalString
+                    : "same-origin:" + relativeUri.OriginalString.Substring(0, separator);
+            }
+
             if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             {
                 return "invalid";

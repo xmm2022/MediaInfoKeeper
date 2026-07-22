@@ -279,7 +279,9 @@ namespace MediaInfoKeeper.Patch
                 var requestContext = GetPropertyValue<IRequest>(__instance, "Request");
                 var client = ResolveClient(requestContext);
                 var mode = ResolveMode(requestContext, client);
-                if (mode != PlaybackDirectUrlMode.CacheFlyHls || !IsModeEnabled(mode))
+                if (mode != PlaybackDirectUrlMode.CacheFlyHls ||
+                    !IsModeEnabled(mode) ||
+                    !EsaPlaybackDirectUrlPolicy.IsPlaybackInfoDirectUrlCompatible(client))
                 {
                     return;
                 }
@@ -329,6 +331,15 @@ namespace MediaInfoKeeper.Patch
                 var mode = ResolveMode(requestContext, client);
                 if (mode == PlaybackDirectUrlMode.None || !IsModeEnabled(mode))
                 {
+                    return;
+                }
+
+                if (!EsaPlaybackDirectUrlPolicy.IsPlaybackInfoDirectUrlCompatible(client))
+                {
+                    logger?.Info(
+                        "EsaPlaybackDirectUrl: Hills Windows 兼容模式，保留 Emby 原始流地址。itemId={0}, mode={1}",
+                        GetPropertyValue<string>(__0, "Id"),
+                        mode);
                     return;
                 }
 
