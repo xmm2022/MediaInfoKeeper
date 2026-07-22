@@ -55,6 +55,39 @@
 - 不支持：`4.8` 系列
 
 
+🧊 Range Cache 联动（可选）
+--------------------------
+
+MediaInfoKeeper 可以与独立项目 [Emby Range Cache Proxy](https://github.com/xmm2022/emby-range-cache-proxy) 配合使用。两个项目职责分开，既可以联合部署，也可以各自独立运行：
+
+- MediaInfoKeeper 运行在 Emby 进程内，负责识别入库、手动提取、计划任务和播放下一集等事件，并按插件开关提交预热意图。
+- Emby Range Cache Proxy 是独立的 Go 服务，负责请求资格校验、源站访问、head/tail 缓存、可选 middle cache，以及 `normal`、`read_only`、`bypass` 运行模式。
+- Caddy 或其他可信反向代理负责验证播放签名，并只对合格的播放请求设置缓存资格；普通 STRM、ffprobe、截图和探测请求不应获得缓存资格。
+- 两者不要求在同一台服务器。跨主机部署时，建议让插件只访问 Emby 主机上的 loopback 控制桥，再由控制桥通过 HTTPS、来源 IP 白名单和独立控制密钥访问远端 Go 服务。
+
+典型调用关系：
+
+```text
+Emby + MediaInfoKeeper
+  ├─ 提交 itemId/mediaSourceId ──> /internal/prewarm
+  └─ 保存 Range Cache 总开关 ──> 本机控制桥 ──> /internal/cache-mode
+
+客户端播放 ──> 可信反向代理/签名校验 ──> Emby Range Cache Proxy ──> 源站
+```
+
+“媒体信息”页中的开关具有以下边界：
+
+| 开关 | 作用 |
+| --- | --- |
+| `启用 Range Cache` | 总开关。关闭后远端进入 `bypass`，停止缓存读取、新建缓存和预热，但不删除已有缓存。 |
+| `提取成功后触发 Range Cache 预热` | 只在入库、快捷菜单或计划任务提取/恢复成功后预热 head/tail。 |
+| `播放时预热下一集 Range Cache` | 播放剧集约 5 秒后独立预热下一集，不依赖下一集是否需要提取 MediaInfo。 |
+
+总开关优先级最高。“MediaInfo 预加载”和“浏览剧集提取媒体信息”只负责媒体信息，不会隐式预热 Range Cache；关闭“提取成功后触发预热”也不会关闭正常播放缓存或独立的下一集预热。
+
+预热端点默认使用 `http://127.0.0.1:18180/internal/prewarm`，控制端点默认使用 `http://127.0.0.1:18180/internal/cache-mode`。密钥不要写入 README、日志或公开配置；远端控制密钥应与预热密钥分开。完整的缓存服务配置、反向代理边界和运行模式说明见 [Emby Range Cache Proxy README](https://github.com/xmm2022/emby-range-cache-proxy#readme)。
+
+
 🔐 STRM 原生 op 签名
 --------------------
 
