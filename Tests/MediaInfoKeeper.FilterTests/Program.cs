@@ -456,6 +456,13 @@ AssertTrue(
     RangeCachePrewarmTriggerPolicy.ShouldTriggerAfterItemAdded(hasMediaInfo: false, restoredMediaInfo: true),
     "item-added prewarm should trigger when MediaInfo was restored from JSON");
 
+AssertTrue(
+    RangeCachePrewarmTriggerPolicy.ShouldTriggerAfterItemAdded(
+        hasMediaInfo: false,
+        restoredMediaInfo: false,
+        extractedMediaInfo: true),
+    "item-added prewarm should trigger when MediaInfo was freshly extracted");
+
 AssertFalse(
     RangeCachePrewarmTriggerPolicy.ShouldTriggerAfterItemAdded(hasMediaInfo: false, restoredMediaInfo: false),
     "item-added prewarm should wait until MediaInfo is available");
